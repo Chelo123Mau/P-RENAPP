@@ -1,0 +1,23 @@
+# render.yaml (en la raíz del monorepo)
+services:
+  - type: web
+    name: renapp-backend
+    env: node
+    rootDir: backend
+    buildCommand: "npm install && npm run build"
+    startCommand: "npm start"
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONT_ORIGIN
+        value: https://renapp-frontend.onrender.com
+
+  - type: static
+    name: renapp-frontend
+    rootDir: frontend
+    buildCommand: "npm install && npm run build"
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://renapp-backend.onrender.com

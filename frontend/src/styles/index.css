@@ -1,0 +1,59 @@
+/* estilos base para formularios estilo “guía” */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* tus estilos personalizados... */
+
+
+.form-shell {
+  @apply bg-[#0B1220] min-h-screen text-gray-100 p-6;
+}
+.form-card {
+  @apply max-w-4xl mx-auto bg-[#111827] rounded-2xl p-6 shadow;
+}
+.form-title {
+  @apply text-2xl font-semibold mb-1;
+}
+.form-subtitle {
+  @apply text-sm opacity-80 mb-6;
+}
+.form-grid {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8;
+}
+.field {
+  @apply col-span-1;
+}
+.field-full {
+  @apply col-span-full;
+}
+.label {
+  @apply block font-medium mb-1;
+}
+.label .req {
+  @apply text-red-400;
+}
+.desc {
+  @apply block text-xs text-gray-300 mb-2;
+}
+.input, .select, .textarea {
+  @apply w-full bg-gray-800 rounded-xl px-3 py-2 outline-none border border-transparent focus:border-blue-500;
+}
+.help {
+  @apply text-xs text-gray-300 mt-1;
+}
+.actions {
+  @apply col-span-full mt-6 flex flex-wrap gap-3;
+}
+.btn {
+  @apply rounded-xl px-4 py-2 transition;
+}
+.btn-primary {
+  @apply bg-blue-600 hover:bg-blue-500;
+}
+.btn-ghost {
+  @apply border border-gray-600 hover:bg-gray-700;
+}
+.hr {
+  @apply col-span-full border-t border-gray-700 my-2;
+}

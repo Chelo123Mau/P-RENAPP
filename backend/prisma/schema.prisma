@@ -1,0 +1,182 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+  REVIEWER
+}
+
+enum Status {
+  BORRADOR
+  ENVIADO
+  APROBADO
+  OBSERVACIONES
+  REVISION_FINAL
+  SOLICITUD_MOD_REGISTRO
+}
+
+model User {
+  id               String   @id @default(uuid())
+  username         String   @unique
+  email            String   @unique
+  passwordHash     String
+  role             Role     @default(USER)
+  isApproved       Boolean  @default(false)
+  profileCompleted Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // 👇 relaciones de vuelta
+  projects        Project[]
+  inboxItems      InboxItem[]
+  profile         UserProfile?
+  files           File[]
+  drafts          Draft[]
+  entity          Entity?
+}
+
+model UserProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  // ====== columnas normalizadas del formulario ======
+  nombres         String?
+  apellidos       String?
+  tipoDocumento   String? // CI, Pasaporte, etc.
+  nroDocumento    String?
+  pais            String?
+  departamento    String?
+  ciudad          String?
+  direccion       String?
+  institucion     String?
+  cargo           String?
+  telefono        String?
+  fechaNacimiento String? // ISO "YYYY-MM-DD" o texto
+
+  // ====== snapshot completo del formulario ======
+  data Json?
+
+  // estado del flujo
+  status String @default("BORRADOR") // BORRADOR | ENVIADO | APROBADO | OBSERVACIONES | SOLICITUD_MOD_REGISTRO
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Draft {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @unique
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Entity {
+  id     String @id @default(uuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @unique
+
+  // Campos normalizados (persisten aunque cambie "data")
+  name                  String
+  telefono              String?
+  correo                String?
+  web                   String?
+  direccion             String?
+  tipoEntidad           String?
+  fechaConstitucion     String?
+  municipioConstitucion String?
+  representanteLegal    String?
+  numeroComercial       String?
+  nit                   String?
+  nacionalOExtranjera   String?
+
+  status    Status   @default(ENVIADO)
+  data      Json? // snapshot completo del formulario
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  files    File[]
+  projects Project[]
+}
+
+model Project {
+  id     String @id @default(uuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  entity   Entity @relation(fields: [entityId], references: [id])
+  entityId String
+
+  title              String
+  titularMedida      String?
+  representanteLegal String?
+  numeroIdentidad    String?
+  numeroDocNotariado String?
+  modeloMercado      String?
+  areaProyecto       String?
+
+  status    Status   @default(ENVIADO)
+  data      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  files File[]
+}
+
+model File {
+  id        String   @id @default(uuid())
+  user      User?     @relation(fields: [userId], references: [id])
+  userId    String?
+  entity    Entity?  @relation(fields: [entityId], references: [id])
+  entityId  String?
+  project   Project? @relation(fields: [projectId], references: [id])
+  projectId String?
+  fieldKey  String    
+
+  key       String
+  url       String
+  name      String
+  size      Int
+  mime      String
+  createdAt DateTime @default(now())
+}
+
+model HistoryEntry {
+  id String @id @default(uuid())
+
+  byUserId String?
+  
+  
+
+  action   String
+  title    String
+  snapshot Json?
+  status   String?
+
+  createdAt DateTime @default(now())
+
+  @@ignore   // ⛔ Ignorar temporalmente este modelo (Studio y Client no lo consultarán)
+}
+
+model InboxItem {
+  id     String @id @default(uuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  scope     String
+  scopeId   String
+  title     String
+  comments  String?
+  status    Status?
+  pdfUrl    String?
+  createdAt DateTime @default(now())
+}
