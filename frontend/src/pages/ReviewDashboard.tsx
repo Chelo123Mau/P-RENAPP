@@ -37,7 +37,18 @@ function fmtDate(s?: string) {
   try { return new Date(s).toLocaleString(); } catch { return s; }
 }
 
-type ProfileDoc = { id: string; name: string; url: string;fieldKey?: string;uploadedAt?: string };
+type ProfileDoc = {
+  id: string;
+  name: string;
+  url: string;
+  size?: number;
+  mime?: string;
+  fieldKey?: string | null;
+  createdAt?: string;
+  // 👇 agrega:
+  docType?: "USUARIO" | "ENTIDAD" | "PROYECTO" | string;
+};
+
 
 type UserProfile = {
   email?: string;
@@ -56,6 +67,28 @@ type UserProfile = {
   fechaNacimiento?: string;
   data?: any;
 };
+
+type EntityListItem = {
+  id: string;
+  email?: string;
+  status?: string;
+  isApproved?: boolean;
+  name?: string | null;
+  razonSocial?: string | null;
+};
+
+type EntityProfile = Record<string, any>;
+
+type ProjectListItem = {
+  id: string;
+  email?: string;
+  status?: string;
+  isApproved?: boolean;
+  title?: string | null;
+};
+
+type ProjectProfile = Record<string, any>;
+
 
 const API_BASE =
   (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_API_URL) ||
@@ -175,7 +208,21 @@ export default function ReviewDashboard() {
   const [alreadyApproved, setAlreadyApproved] = React.useState<boolean>(false);
   const [savingComment, setSavingComment] = React.useState(false);
   const [newComment, setNewComment] = React.useState("");
+  // === ENTIDADES ===
+const [entities, setEntities] = React.useState<any[]>([]);
+const [entitiesMeta, setEntitiesMeta] = React.useState<{ page?: number; pageSize?: number; total?: number }>({ page: 1, pageSize: 20, total: 0 });
+const [entityDocs, setEntityDocs] = React.useState<any[]>([]);
+const [activeEntity, setActiveEntity] = React.useState<any|null>(null);
+const [entityDetail, setEntityDetail] = React.useState<any | null>(null);
+const [entityApproved, setEntityApproved] = React.useState<boolean>(false);
 
+// === PROYECTOS ===
+const [projects, setProjects] = React.useState<any[]>([]);
+const [projectsMeta, setProjectsMeta] = React.useState<{ page?: number; pageSize?: number; total?: number }>({ page: 1, pageSize: 20, total: 0 });
+const [activeProject, setActiveProject] = React.useState<any|null>(null);
+const [projectDetail, setProjectDetail] = React.useState<any | null>(null);
+const [projectDocs, setProjectDocs] = React.useState<any[]>([]);
+const [projectApproved, setProjectApproved] = React.useState(false);
   
   // ==========================
   // Carga de listas según tab
@@ -195,18 +242,42 @@ export default function ReviewDashboard() {
 
 
           if (!r.ok) {
-  setUsers([]);
-  setLoadError(r.error || "No se pudo cargar usuarios");
-} else {
-  // ⚠️ IMPORTANTE: el backend responde { ok, data: { items, meta } }
-  const serverData = (r.data as any)?.data;
-  const items = serverData?.items ?? [];
-  const serverMeta = serverData?.meta ?? meta;
+          setUsers([]);
+          setLoadError(r.error || "No se pudo cargar usuarios");
+          } else {
+         // ⚠️ IMPORTANTE: el backend responde { ok, data: { items, meta } }
+          const serverData = (r.data as any)?.data;
+          const items = serverData?.items ?? [];
+          const serverMeta = serverData?.meta ?? meta;
 
-  setUsers(items);
-  setMeta(serverMeta);
+          setUsers(items);
+           setMeta(serverMeta);
           }
         }
+
+        if (tab === "entities") {
+  const qs = new URLSearchParams();
+  qs.set("page", String(entitiesMeta.page || 1));
+  qs.set("pageSize", String(entitiesMeta.pageSize || 20));
+  const r = await authJson(`/api/review/entities?${qs.toString()}`);
+  if (!r.ok) throw new Error(r.error || "Error cargando entidades");
+  const data = (r.data as any)?.data;
+  setEntities(data?.items || []);
+  setEntitiesMeta(data?.meta || { page: 1, pageSize: 20, total: 0 });
+}
+
+if (tab === "projects") {
+  const qs = new URLSearchParams();
+  qs.set("page", String(projectsMeta.page || 1));
+  qs.set("pageSize", String(projectsMeta.pageSize || 20));
+  const r = await authJson(`/api/review/projects?${qs.toString()}`);
+  if (!r.ok) throw new Error(r.error || "Error cargando proyectos");
+  const data = (r.data as any)?.data;
+  setProjects(data?.items || []);
+  setProjectsMeta(data?.meta || { page: 1, pageSize: 20, total: 0 });
+}
+
+
       } catch (e: any) {
         setLoadError(e?.message || "Error de red");
       } finally {
@@ -214,7 +285,7 @@ export default function ReviewDashboard() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, meta.page, meta.pageSize]);
+  }, [tab, meta.page, meta.pageSize, entitiesMeta.page, entitiesMeta.pageSize, projectsMeta.page, projectsMeta.pageSize]);
 
   // ==========================
   // Handlers detalle de usuario
@@ -240,6 +311,89 @@ export default function ReviewDashboard() {
     }
   };
 
+  // === ENTIDADES ===
+const openEntityDetail = async (entity: EntityListItem) => {
+  setSelectedScope("entity");
+  setSelectedId(entity.id);
+  setMsg("Cargando detalle…");
+  try {
+    const [pr, dr, hr] = await Promise.all([
+      authJson<EntityProfile>(`/api/entities/${entity.id}/profile`),
+      authJson<Paginated<ProfileDoc>>(`/api/entities/${entity.id}/documents`),
+      authJson<Paginated<any>>(`/api/review/history?scope=entity&targetId=${entity.id}`),
+    ]);
+
+    setEntityDetail(pr.ok ? ((pr.data as any)?.data ?? pr.data ?? null) : null);
+    setEntityDocs(
+      dr.ok
+        ? (((dr.data as any)?.data?.items) ?? (dr.data as any)?.items ?? [])
+        : []
+    );
+    setHistory(
+      hr.ok
+        ? (((hr.data as any)?.data?.items) ?? (hr.data as any)?.items ?? [])
+        : []
+    );
+
+    setEntityApproved(!!(ent?.status === "APROBADO"));
+
+    // Mantiene la misma lógica de "aprobado" que usas en usuarios
+    setAlreadyApproved(
+      !!(
+        entity.isApproved ||
+        ((pr.ok && ((pr.data as any)?.data ?? pr.data)?.status) === "APROBADO")
+      )
+    );
+
+    setReportMode(null);
+    setPdfUrl(null);
+  } finally {
+    setMsg("");
+  }
+};
+
+// === PROYECTOS ===
+const openProjectDetail = async (project: ProjectListItem) => {
+  setSelectedScope("project");
+  setSelectedId(project.id);
+  setMsg("Cargando detalle…");
+  try {
+    const [pr, dr, hr] = await Promise.all([
+      authJson<ProjectProfile>(`/api/projects/${project.id}/profile`),
+      authJson<Paginated<ProfileDoc>>(`/api/projects/${project.id}/documents`),
+      authJson<Paginated<any>>(`/api/review/history?scope=project&targetId=${project.id}`),
+    ]);
+
+    setProjectDetail(pr.ok ? ((pr.data as any)?.data ?? pr.data ?? null) : null);
+    setProjectDocs(
+      dr.ok
+        ? (((dr.data as any)?.data?.items) ?? (dr.data as any)?.items ?? [])
+        : []
+    );
+    setHistory(
+      hr.ok
+        ? (((hr.data as any)?.data?.items) ?? (hr.data as any)?.items ?? [])
+        : []
+    );
+
+    setProjectApproved(!!(proj?.status === "APROBADO"));
+
+    setAlreadyApproved(
+      !!(
+        project.isApproved ||
+        ((pr.ok && ((pr.data as any)?.data ?? pr.data)?.status) === "APROBADO")
+      )
+    );
+
+    setReportMode(null);
+    setPdfUrl(null);
+  } finally {
+    setMsg("");
+  }
+};
+
+
+
   const approveUser = async () => {
     if (alreadyApproved) {
       alert("Este usuario ya está aprobado");
@@ -262,45 +416,82 @@ export default function ReviewDashboard() {
     }
   };
 
-  const generateReport = async () => {
-    if (!reportMode) { alert("Elige tipo de reporte"); return; }
-    if (!selectedId) return;
-    setMsg("Generando reporte…");
-    try {
-      const out = await generateReviewPdfAndSend({
-        scope: "user",
-        target: { id: selectedId, profile: userDetail },
-        targetId: selectedId,
-        decision: reportMode === "approve" ? "approve" : "observe",
-        comments: newComment || "",
-        reviewerName: "Revisor RENAPP",
-      });
-      if (out.url) setPdfUrl(out.url);
-    } finally {
-      setMsg("");
-    }
-  };
+  const approveEntity = async () => {
+  if (entityApproved) return alert("Esta entidad ya está aprobada");
+  if (!selectedId) return;
+  setMsg("Aprobando entidad…");
+  try {
+    const r = await authJson(`/api/review/entities/${selectedId}/approve`, { method: "POST" });
+    if (!r.ok) return alert(r.error || "No se pudo aprobar");
+    setEntityApproved(true);
+    const hr = await authJson(`/api/review/history?scope=entity&targetId=${selectedId}`);
+    if (hr.ok) setHistory(((hr.data as any)?.items) || []);
+    alert("Entidad aprobada.");
+  } finally { setMsg(""); }
+};
 
-  const saveComment = async () => {
-    if (!newComment.trim()) { alert("Comentario vacío"); return; }
-    if (!selectedId) return;
-    setSavingComment(true);
-    try {
-      const r = await authJson(`/api/review/comments`, {
-        method: "POST",
-        body: JSON.stringify({ scope: "user", targetId: selectedId, text: newComment }),
-      });
-      if (r.ok) {
-        setNewComment("");
-        const hr = await authJson<Paginated<any>>(`/api/review/history?scope=user&targetId=${selectedId}`);
-        if (hr.ok) setHistory(hr.data?.items || []);
-      } else {
-        alert(r.error || "No se pudo guardar el comentario.");
-      }
-    } finally {
-      setSavingComment(false);
-    }
-  };
+const approveProject = async () => {
+  if (projectApproved) return alert("Este proyecto ya está aprobado");
+  if (!selectedId) return;
+  setMsg("Aprobando proyecto…");
+  try {
+    const r = await authJson(`/api/review/projects/${selectedId}/approve`, { method: "POST" });
+    if (!r.ok) return alert(r.error || "No se pudo aprobar");
+    setProjectApproved(true);
+    const hr = await authJson(`/api/review/history?scope=project&targetId=${selectedId}`);
+    if (hr.ok) setHistory(((hr.data as any)?.items) || []);
+    alert("Proyecto aprobado.");
+  } finally { setMsg(""); }
+};
+
+
+const generateReport = async () => {
+  if (!reportMode) return alert("Elige tipo de reporte");
+  if (!selectedId) return;
+
+  const scope = selectedScope; // "user" | "entity" | "project"
+  const targetProfile =
+    scope === "user" ? userDetail :
+    scope === "entity" ? entityDetail :
+    scope === "project" ? projectDetail : null;
+
+  setMsg("Generando reporte…");
+  try {
+    const out = await generateReviewPdfAndSend({
+      scope,
+      targetId: selectedId,
+      target: { id: selectedId, profile: targetProfile },
+      decision: reportMode === "approve" ? "approve" : "observe",
+      comments: newComment || "",
+      reviewerName: "Revisor RENAPP",
+    });
+    if (out?.url) setPdfUrl(out.url);
+  } finally { setMsg(""); }
+};
+
+const saveComment = async () => {
+  if (!newComment.trim()) return alert("Comentario vacío");
+  if (!selectedId) return;
+
+  const scope = selectedScope;
+  setSavingComment(true);
+  try {
+    const r = await authJson(`/api/review/comments`, {
+      method: "POST",
+      body: JSON.stringify({ scope, targetId: selectedId, text: newComment }),
+    });
+    if (!r.ok) return alert(r.error || "No se pudo guardar el comentario");
+    setNewComment("");
+    const hr = await authJson(`/api/review/history?scope=${scope}&targetId=${selectedId}`);
+    if (hr.ok) setHistory(((hr.data as any)?.items) || []);
+  } finally { setSavingComment(false); }
+};
+
+// === FILTROS DE DOCUMENTOS POR TIPO ===
+const userDocsFiltered    = Array.isArray(userDocs)    ? userDocs.filter(d => d.docType === "USUARIO")   : [];
+const entityDocsFiltered  = Array.isArray(entityDocs)  ? entityDocs.filter(d => d.docType === "ENTIDAD") : [];
+const projectDocsFiltered = Array.isArray(projectDocs) ? projectDocs.filter(d => d.docType === "PROYECTO"): [];
+// ======================================
 
   // ==========================
   // Render
@@ -375,7 +566,7 @@ export default function ReviewDashboard() {
             {selectedScope === "user" && selectedId && (
               <div className="mt-6 grid gap-4">
                 {/* Header con acciones */}
-                <div className="flex flex-wrap items-center gap-2">
+                < div className="flex flex-wrap items-center gap-2">
                   <div className="text-lg font-semibold">
                     Usuario: {userDetail?.nombres} {userDetail?.apellidos}
                   </div>
@@ -433,19 +624,22 @@ export default function ReviewDashboard() {
   <div className="text-sm opacity-70">Sin documentos.</div>
 ) : (
   <ul className="list-disc pl-5">
-    {userDocs.map((d) => {
-      const href = d.url?.startsWith("http") ? d.url : `${API_URL || ""}${d.url || ""}`;
-      return (
-        <li key={d.id} className="mb-1">
-          <div className="text-xs opacity-70">
-            {d.fieldKey || "—"} · {fmtDate(d.uploadedAt)}
-          </div>
-          <a className="text-blue-400 hover:underline" href={href} target="_blank" rel="noreferrer">
-            {d.name}
-          </a>
-        </li>
-      );
-    })}
+    {userDocs.filter((d) => d.docType === "USUARIO").map((d) => (
+  <div key={d.id} className="flex items-center justify-between py-1">
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-gray-400">{d.fieldKey}</span>
+      <span>{d.name}</span>
+    </div>
+    <a
+      href={d.url}
+      target="_blank"
+      rel="noreferrer"
+      className="text-blue-400 hover:underline"
+    >
+      Ver/Descargar
+    </a>
+  </div>
+))}
   </ul>
 )}
 
@@ -527,12 +721,314 @@ export default function ReviewDashboard() {
         )}
 
         {/* ===== TAB ENTIDADES / PROYECTOS (estructura a replicar) ===== */}
-        {tab !== "users" && (
-          <div className="text-sm opacity-80">
-            Esta sección usará la misma mecánica de apertura de paneles con detalle, documentos, aprobar, reporte, comentarios e historial.
-            <br/>Indícame si ya tienes los endpoints listos (GET /entities, GET /projects, etc.) y lo conecto aquí de inmediato.
-          </div>
-        )}
+        {tab === "entities" && (
+  <>
+    {entities.length === 0 ? (
+      <div className="text-sm opacity-70">Sin entidades.</div>
+    ) : (
+      <div className="overflow-auto rounded-2xl border border-white/10">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-800/60">
+            <tr>
+              <th className="text-left p-3">Nombre</th>
+              <th className="text-left p-3">Usuario que la registró</th>
+              <th className="text-left p-3">Aprobado</th>
+              <th className="text-left p-3">Mail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entities.map((e) => (
+              <tr
+                key={e.id}
+                className="hover:bg-white/5 cursor-pointer"
+                onClick={() => openEntityDetail(e)}
+              >
+                <td className="p-3">{e.name ?? "—"}</td>
+                <td className="p-3">{e.username ? e.email.split("@")[0] : "—"}</td>
+                <td className="p-3">{e.status === "APROBADO" ? "Sí" : "No"}</td>
+                <td className="p-3">{e.email ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {selectedScope === "entity" && selectedId && (
+  <div className="mt-6 grid gap-4">
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="text-lg font-semibold">
+        Entidad: {entityDetail?.name || entityDetail?.razonSocial || "—"}
+      </div>
+      <div className="ml-auto flex gap-2">
+        <button className="bg-green-600 hover:bg-green-500 rounded px-3 py-1" onClick={approveEntity}>
+          Aprobar
+        </button>
+        <div className="flex items-center gap-2">
+          <select
+            className="bg-gray-800 rounded-xl px-2 py-1 outline-none border border-transparent focus:border-blue-500"
+            value={reportMode || ""}
+            onChange={(e) => setReportMode((e.target.value as any) || null)}
+          >
+            <option value="">Generar reporte…</option>
+            <option value="approve">Aprobación</option>
+            <option value="observe">Observaciones</option>
+          </select>
+          <button className="bg-indigo-600 hover:bg-indigo-500 rounded px-3 py-1" onClick={generateReport} disabled={!reportMode}>
+            Generar PDF
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {pdfUrl && (
+      <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <button className="bg-gray-700 hover:bg-gray-600 rounded px-3 py-1" onClick={() => setPdfUrl(null)}>Cerrar</button>
+          <a href={pdfUrl} download className="bg-gray-800 hover:bg-gray-700 rounded px-3 py-1">Guardar</a>
+        </div>
+        <iframe src={pdfUrl} className="w-full h-[70vh] rounded-xl border border-white/10" />
+      </div>
+    )}
+
+     
+{/* Formulario estilo registro — ENTIDAD */}
+<div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <Field label="Nombre / Razón social" value={entityDetail?.name} />
+    <Field label="NIT" value={entityDetail?.nit} />
+    <Field label="Representante legal" value={entityDetail?.representanteLegal} />
+    <Field label="Número comercial" value={entityDetail?.numeroComercial} />
+    <Field label="Correo" value={entityDetail?.correo} />
+    <Field label="Teléfono" value={entityDetail?.telefono} />
+    <Field label="Web" value={entityDetail?.web} />
+    <Field label="Dirección" value={entityDetail?.direccion} />
+    <Field label="Tipo de entidad" value={entityDetail?.tipoEntidad} />
+    <Field label="Nacional / Extranjera" value={entityDetail?.nacionalOExtranjera} />
+    <Field label="Fecha constitución" value={entityDetail?.fechaConstitucion} />
+    <Field label="Municipio constitución" value={entityDetail?.municipioConstitucion} />
+    <Field label="Departamento" value={entityDetail?.departamento} />
+    <Field label="País" value={entityDetail?.pais} />
+    <Field label="Estado" value={entityDetail?.status} />
+    <Field label="Fecha registro" value={entityDetail?.createdAt} />
+  </div>
+</div>
+
+
+
+    <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+      <div className="font-semibold mb-2">Documentos</div>
+      {entityDocs.length === 0 ? (
+        <div className="text-sm opacity-70">Sin documentos.</div>
+      ) : (
+        <ul className="list-disc pl-5">
+          {entityDocs.map((d) => (
+            <li key={d.id} className="flex items-center justify-between py-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">{d.fieldKey}</span>
+                <span>{d.name}</span>
+              </div>
+              <a href={absUrl(d.url)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Ver/Descargar</a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+
+    <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+      <div className="font-semibold mb-2">Comentarios</div>
+      <textarea className="w-full bg-gray-800 rounded p-2 text-sm" rows={4}
+        placeholder="Escribe un comentario…" value={newComment} onChange={(e) => setNewComment(e.target.value)} />
+      <div className="mt-2">
+        <button disabled={savingComment} className="bg-blue-600 hover:bg-blue-500 rounded px-3 py-1 disabled:opacity-60" onClick={saveComment}>
+          Guardar comentario
+        </button>
+      </div>
+    </div>
+
+    <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+      <div className="font-semibold mb-2">Historial</div>
+      {history.length === 0 ? (
+        <div className="text-sm opacity-70">Sin actividad.</div>
+      ) : (
+        <ul className="space-y-2">
+          {history.map((h, idx) => (
+            <li key={idx} className="text-sm">
+              <span className="text-gray-400">{new Date(h.createdAt || h.date || Date.now()).toLocaleString()}</span>{" – "}
+              <span className="uppercase">{h.action || h.type}</span>{h.title ? ` · ${h.title}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  </div>
+)}
+
+  </>
+)}
+{tab === "projects" && (
+  <>
+    {projects.length === 0 ? (
+      <div className="text-sm opacity-70">Sin proyectos.</div>
+    ) : (
+      <div className="overflow-auto rounded-2xl border border-white/10">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-800/60">
+            <tr>
+              <th className="text-left p-3">Título</th>
+              <th className="text-left p-3">Usuario que la registró</th>
+              <th className="text-left p-3">Aprobado</th>
+              <th className="text-left p-3">Mail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {projects.map((p) => (
+              <tr
+                key={p.id}
+                className="hover:bg-white/5 cursor-pointer"
+                onClick={() => openProjectDetail(p)}
+              >
+                <td className="p-3">{p.username ?? "—"}</td> {/* backend: title → username */}
+                <td className="p-3">{p.email ? p.email.split("@")[0] : "—"}</td>
+                <td className="p-3">{p.status === "APROBADO" ? "Sí" : "No"}</td>
+                <td className="p-3">{p.email ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {selectedScope === "project" && selectedId && (
+  <div className="mt-6 grid gap-4">
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="text-lg font-semibold">
+        Proyecto: {projectDetail?.title || projectDetail?.nombre || "—"}
+      </div>
+      <div className="ml-auto flex gap-2">
+        <button className="bg-green-600 hover:bg-green-500 rounded px-3 py-1" onClick={approveProject}>
+          Aprobar
+        </button>
+        <div className="flex items-center gap-2">
+          <select
+            className="bg-gray-800 rounded-xl px-2 py-1 outline-none border border-transparent focus:border-blue-500"
+            value={reportMode || ""}
+            onChange={(e) => setReportMode((e.target.value as any) || null)}
+          >
+            <option value="">Generar reporte…</option>
+            <option value="approve">Aprobación</option>
+            <option value="observe">Observaciones</option>
+          </select>
+          <button className="bg-indigo-600 hover:bg-indigo-500 rounded px-3 py-1" onClick={generateReport} disabled={!reportMode}>
+            Generar PDF
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {pdfUrl && (
+      <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <button className="bg-gray-700 hover:bg-gray-600 rounded px-3 py-1" onClick={() => setPdfUrl(null)}>Cerrar</button>
+          <a href={pdfUrl} download className="bg-gray-800 hover:bg-gray-700 rounded px-3 py-1">Guardar</a>
+        </div>
+        <iframe src={pdfUrl} className="w-full h-[70vh] rounded-xl border border-white/10" />
+      </div>
+    )}
+
+    
+{/* Formulario estilo registro — PROYECTO */}
+{/* Formulario estilo registro — PROYECTO (alineado a Panel.tsx) */}
+<div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {/* Campos planos que almacenas al crear el proyecto */}
+    <Field label="Título del programa/proyecto" value={projectDetail?.title ?? projectDetail?.data?.nombreProyecto} />
+    <Field label="Modelo de mercado" value={projectDetail?.summary ?? projectDetail?.data?.modeloMercado} />
+    <Field label="Estado" value={projectDetail?.status} />
+
+    {/* Campos que vienen en projectDetail.data */}
+    <Field label="Titular de la medida" value={projectDetail?.data?.titularMedida} />
+    <Field label="Representante legal" value={projectDetail?.data?.representanteLegal} />
+    <Field label="Número de identidad (CI)" value={projectDetail?.data?.numeroIdentidad} />
+    <Field label="Nº documento notariado" value={projectDetail?.data?.numeroDocNotariado} />
+    <Field label="Área del proyecto (depto/municipio/coord/superficie)" value={projectDetail?.data?.areaProyecto} />
+
+    {/* Adjuntos (solo nombres/contador visible — opcional) */}
+    <Field label="Documento de titularidad / resolución" value={Array.isArray(projectDetail?.data?.docTitularidad) ? `${projectDetail.data.docTitularidad.length} archivo(s)` : ""} />
+    <Field label="Poder notariado (rep. legal)" value={Array.isArray(projectDetail?.data?.docPoderNotariado) ? `${projectDetail.data.docPoderNotariado.length} archivo(s)` : ""} />
+    <Field label="Copia de CI del representante" value={Array.isArray(projectDetail?.data?.docIdentidad) ? `${projectDetail.data.docIdentidad.length} archivo(s)` : ""} />
+    <Field label="Licencia ambiental (si aplica)" value={Array.isArray(projectDetail?.data?.docLicenciaAmbiental) ? `${projectDetail.data.docLicenciaAmbiental.length} archivo(s)` : ""} />
+    <Field label="DDMM aprobado por OVV" value={Array.isArray(projectDetail?.data?.docDDMM_OVV) ? `${projectDetail.data.docDDMM_OVV.length} archivo(s)` : ""} />
+    <Field label="Reporte de validación del OVV" value={Array.isArray(projectDetail?.data?.docReporteValidacion) ? `${projectDetail.data.docReporteValidacion.length} archivo(s)` : ""} />
+    <Field label="Actas y documentación de consultas" value={Array.isArray(projectDetail?.data?.docActasConsultas) ? `${projectDetail.data.docActasConsultas.length} archivo(s)` : ""} />
+    <Field label="Mapa o croquis de localización" value={Array.isArray(projectDetail?.data?.docMapaCroquis) ? `${projectDetail.data.docMapaCroquis.length} archivo(s)` : ""} />
+    <Field label="PPM / PASA" value={Array.isArray(projectDetail?.data?.ppmPasa) ? `${projectDetail.data.ppmPasa.length} archivo(s)` : ""} />
+
+    {/* Fechas de auditoría si las necesitas */}
+    <Field label="Fecha de registro" value={projectDetail?.createdAt} />
+    <Field label="Última actualización" value={projectDetail?.updatedAt} />
+
+    {/* Si quieres ver el JSON crudo para depurar (opcional)
+    <div className="md:col-span-2">
+      <Field label="Payload (data)" value={projectDetail?.data ? JSON.stringify(projectDetail.data) : ""} />
+    </div> */}
+  </div>
+</div>
+
+
+
+    <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+      <div className="font-semibold mb-2">Documentos</div>
+      {projectDocs.length === 0 ? (
+        <div className="text-sm opacity-70">Sin documentos.</div>
+      ) : (
+        <ul className="list-disc pl-5">
+          {projectDocs.map((d) => (
+            <li key={d.id} className="flex items-center justify-between py-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">{d.fieldKey}</span>
+                <span>{d.name}</span>
+              </div>
+              <a href={absUrl(d.url)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Ver/Descargar</a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+
+    <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+      <div className="font-semibold mb-2">Comentarios</div>
+      <textarea className="w-full bg-gray-800 rounded p-2 text-sm" rows={4}
+        placeholder="Escribe un comentario…" value={newComment} onChange={(e) => setNewComment(e.target.value)} />
+      <div className="mt-2">
+        <button disabled={savingComment} className="bg-blue-600 hover:bg-blue-500 rounded px-3 py-1 disabled:opacity-60" onClick={saveComment}>
+          Guardar comentario
+        </button>
+      </div>
+    </div>
+
+    <div className="bg-[#0F172A] rounded-2xl border border-white/10 p-4">
+      <div className="font-semibold mb-2">Historial</div>
+      {history.length === 0 ? (
+        <div className="text-sm opacity-70">Sin actividad.</div>
+      ) : (
+        <ul className="space-y-2">
+          {history.map((h, idx) => (
+            <li key={idx} className="text-sm">
+              <span className="text-gray-400">{new Date(h.createdAt || h.date || Date.now()).toLocaleString()}</span>{" – "}
+              <span className="uppercase">{h.action || h.type}</span>{h.title ? ` · ${h.title}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  </div>
+)}
+
+     
+  </>
+)}
+
       </main>
     </div>
   );

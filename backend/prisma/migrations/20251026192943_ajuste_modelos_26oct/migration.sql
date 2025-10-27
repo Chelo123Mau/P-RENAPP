@@ -1,0 +1,11 @@
+-- CreateEnum
+CREATE TYPE "FileType" AS ENUM ('USUARIO', 'ENTIDAD', 'PROYECTO', 'OVV', 'ESTANDAR', 'METODOLOGIA');
+
+-- AlterTable
+ALTER TABLE "Entity" ALTER COLUMN "status" DROP DEFAULT;
+
+-- AlterTable
+ALTER TABLE "File" ADD COLUMN     "docType" "FileType" NOT NULL DEFAULT 'USUARIO';
+
+-- AlterTable
+ALTER TABLE "Project" ALTER COLUMN "status" DROP DEFAULT;

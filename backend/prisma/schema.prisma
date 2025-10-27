@@ -22,6 +22,15 @@ enum Status {
   SOLICITUD_MOD_REGISTRO
 }
 
+enum FileType {
+  USUARIO
+  ENTIDAD
+  PROYECTO
+  OVV
+  ESTANDAR
+  METODOLOGIA
+}
+
 model User {
   id               String   @id @default(uuid())
   username         String   @unique
@@ -34,12 +43,12 @@ model User {
   updatedAt        DateTime @updatedAt
 
   // 👇 relaciones de vuelta
-  projects        Project[]
-  inboxItems      InboxItem[]
-  profile         UserProfile?
-  files           File[]
-  drafts          Draft[]
-  entity          Entity?
+  projects   Project[]
+  inboxItems InboxItem[]
+  profile    UserProfile?
+  files      File[]
+  drafts     Draft[]
+  entity     Entity?
 }
 
 model UserProfile {
@@ -99,7 +108,7 @@ model Entity {
   nit                   String?
   nacionalOExtranjera   String?
 
-  status    Status   @default(ENVIADO)
+  status    Status
   data      Json? // snapshot completo del formulario
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -124,7 +133,8 @@ model Project {
   modeloMercado      String?
   areaProyecto       String?
 
-  status    Status   @default(ENVIADO)
+  status Status
+
   data      Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -133,29 +143,36 @@ model Project {
 }
 
 model File {
-  id        String   @id @default(uuid())
-  user      User?     @relation(fields: [userId], references: [id])
-  userId    String?
-  entity    Entity?  @relation(fields: [entityId], references: [id])
-  entityId  String?
-  project   Project? @relation(fields: [projectId], references: [id])
-  projectId String?
-  fieldKey  String    
+  id         String   @id @default(uuid())
+  user       User?    @relation(fields: [userId], references: [id])
+  userId     String?
+  entity     Entity?  @relation(fields: [entityId], references: [id])
+  entityId   String?
+  project    Project? @relation(fields: [projectId], references: [id])
+  projectId  String?
+  fieldKey   String
+  entityName String?
 
-  key       String
-  url       String
-  name      String
-  size      Int
-  mime      String
-  createdAt DateTime @default(now())
+  key  String
+  url  String
+  name String
+  size Int?
+  mime String?
+
+  draftKey        String?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  docType         FileType @default(USUARIO)
+
+  @@index([entityId])
+  @@index([draftKey])
+  @@index([createdByUserId])
 }
 
 model HistoryEntry {
   id String @id @default(uuid())
 
   byUserId String?
-  
-  
 
   action   String
   title    String
@@ -164,7 +181,7 @@ model HistoryEntry {
 
   createdAt DateTime @default(now())
 
-  @@ignore   // ⛔ Ignorar temporalmente este modelo (Studio y Client no lo consultarán)
+  @@ignore // ⛔ Ignorar temporalmente este modelo (Studio y Client no lo consultarán)
 }
 
 model InboxItem {

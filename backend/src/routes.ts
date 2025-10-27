@@ -6,6 +6,7 @@ import PDFDocument from "pdfkit";
 import { prisma } from "./prisma";
 import { requireAuth, requireStaff } from "./middleware/auth";
 import { storeFile } from "./storage";
+import { title } from "process";
 
 const r = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -144,7 +145,7 @@ r.post("/api/register/user/submit", requireAuth, async (req: any, res) => {
     res.json({ ok: true });
 });
 /* =========================================================
-PANEL: LISTA DE USUARIOS (SIN HISTORIAL)
+     LISTA DE USUARIOS (SIN HISTORIAL)
    - Devuelve usuarios en filas (uno por fila)
    - SIN filtro por rol temporalmente (ver comentario)*/
 
@@ -187,6 +188,102 @@ r.get("/api/review/users", requireAuth, requireStaff, async (req: any, res) => {
 
   return res.json({ ok: true, data: { items: mapped, meta: { page, pageSize, total } } });
 });
+
+/* =========================================================
+   REVIEW: LISTA DE ENTIDADES (compatible con /api/review/users)
+   - Columnas requeridas: Nombre | Usuario que la registró | Aprobado | Mail
+   - Mismo shape que usuarios: username, email, isApproved, entityName, role
+========================================================= */
+r.get("/api/review/entities", requireAuth, requireStaff, async (req: any, res) => {
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const pageSize = Math.max(1, Math.min(100, parseInt(req.query.pageSize || "20", 10)));
+  const q = String(req.query.q || "").trim();
+
+  const where: any = {};
+  if (q) {
+    where.OR = [
+      { name: { contains: q, mode: "insensitive" } },              // busca por Nombre de entidad
+      
+    ];
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.entity.findMany({
+      where,
+      include: { user: { select: { id: true, email: true,} } },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.entity.count({ where }),
+  ]);
+
+  // 🔁 Shape compatible con /api/review/users
+  const mapped = items.map((e) => ({
+    id: e.id,
+    username: e.name ?? null,                           // ← "Nombre" va en username (misma columna)
+    email: e.user?.email ?? null,                      // ← "Mail" del usuario que registró
+    status: e.status ?? null,                          // 
+    entityId: e.id ?? null,                            // compatibilidad (no usado, pero mismo nombre)
+    entityName: e.name ?? null,                        // compatibilidad para la tabla existente
+    role: null,                                        // compatibilidad (tabla la espera)
+    // opcional: si tu UI muestra "Usuario que la registró" desde username/email del user,
+    // ya está cubierto con email; si necesitas el nombre del registrante:
+    // registrarName: e.user?.fullName ?? null,
+  }));
+
+  return res.json({ ok: true, data: { items: mapped, meta: { page, pageSize, total } } });
+});
+
+
+/* =========================================================
+   REVIEW: LISTA DE PROYECTOS (compatible con /api/review/users y entidades)
+   - Columnas esperadas en UI: Nombre | Usuario que la registró | Aprobado/Status | Mail
+   - Shape devuelto: { id, username, email, status, entityId, entityName, role }
+========================================================= */
+r.get("/api/review/projects", requireAuth, requireStaff, async (req: any, res) => {
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const pageSize = Math.max(1, Math.min(100, parseInt(req.query.pageSize || "20", 10)));
+  const q = String(req.query.q || "").trim();
+
+  const where: any = {};
+  if (q) {
+    where.OR = [
+      { title: { contains: q, mode: "insensitive" } }, // busca por Nombre del proyecto
+      // si luego quieres también por email del registrante, puedes añadir:
+      // { user: { email: { contains: q, mode: "insensitive" } } },
+    ];
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.project.findMany({
+      where,
+      include: {
+        user: { select: { id: true, email: true } },   // quien registró el proyecto
+        entity: { select: { id: true, name: true } },  // entidad asociada (si aplica)
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.project.count({ where }),
+  ]);
+
+  // 🔁 Shape compatible con /api/review/users y /api/review/entities
+  const mapped = items.map((p) => ({
+    id: p.id,
+    title: p.title ?? null,                 // ← "Nombre" del proyecto va en username
+    email: p.user?.email ?? null,             // ← Mail del usuario que registró
+    status: p.status ?? null,                 // ← status como lo tienes en entidades
+    entityId: p.entity?.id ?? null,           // compatibilidad
+    entityName: p.entity?.name ?? null,
+           
+    role: null,                               // compatibilidad (la tabla lo espera)
+  }));
+
+  return res.json({ ok: true, data: { items: mapped, meta: { page, pageSize, total } } });
+});
+
 
 /* =========================================================
    PERFIL DE USUARIO (UserProfile)
@@ -235,13 +332,72 @@ r.get("/api/users/:id/documents", requireAuth, requireStaff, async (req: any, re
   const id = req.params.id;
 
   const files = await prisma.file.findMany({
-    where: { userId: id },
-    select: { id: true, name: true, url: true, mime: true, size: true, createdAt: true },
+    where: { userId: id, docType: "USUARIO"},
+    select: { id: true, name: true, url: true, mime: true, size: true, createdAt: true, fieldKey: true, docType: true, },
     orderBy: { createdAt: "desc" },
   });
 
   return res.json({ ok: true, data: { items: files } });
 });
+
+/* =========================================================
+   DOCUMENTOS DE ENTIDAD
+========================================================= */
+
+r.get("/api/entities/:id/documents", requireAuth, requireStaff, async (req: any, res) => {
+  const id = req.params.id;
+
+  const files = await prisma.file.findMany({
+    where: {
+      entityId: id,       // 👈 deben pertenecer a la entidad indicada
+      docType: "ENTIDAD", // 👈 y además ser de tipo ENTIDAD
+    },
+    select: {
+      id: true,
+      name: true,
+      url: true,
+      mime: true,
+      size: true,
+      createdAt: true,
+      fieldKey: true,
+      draftKey: true,
+      docType: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return res.json({ ok: true, data: { items: files } });
+});
+
+/* =========================================================
+   DOCUMENTOS DE Proyecto
+========================================================= */
+
+r.get("/api/projects/:id/documents", requireAuth, requireStaff, async (req: any, res) => {
+  const id = req.params.id;
+
+  const files = await prisma.file.findMany({
+    where: {
+      projectId: id,       // 👈 archivos que pertenecen al proyecto actual
+      docType: "PROYECTO", // 👈 y que son tipo PROYECTO
+    },
+    select: {
+      id: true,
+      name: true,
+      url: true,
+      mime: true,
+      size: true,
+      createdAt: true,
+      fieldKey: true,
+      draftKey: true,
+      docType: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return res.json({ ok: true, data: { items: files } });
+});
+
 
 /* =========================================================
    REVISOR: APROBAR / OBSERVAR USUARIO
@@ -334,50 +490,152 @@ r.get("/api/entities/mine", requireAuth, async (req: any, res) => {
   res.json(items);
 });
 
-r.post("/api/entities/draft", requireAuth, async (req: any, res) => {
-  await prisma.historyEntry.create({
-    data: { userId: req.userId, scope: "entity", action: "draft-save", title: "Borrador entidad", snapshot: req.body?.data || {} },
+// routes.ts
+r.get("/api/entities/:id/profile", requireAuth, requireStaff, async (req: any, res) => {
+  const id = String(req.params.id);
+
+  const ent = await prisma.entity.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      data: true,
+
+      telefono: true,
+      correo: true,
+      web: true,
+      direccion: true,
+      tipoEntidad: true,
+      fechaConstitucion: true,
+      municipioConstitucion: true,
+      representanteLegal: true,
+      numeroComercial: true,
+      nit: true,
+      nacionalOExtranjera: true,
+
+      createdAt: true,
+      updatedAt: true,
+    },
   });
-  res.json({ ok: true });
-});
 
-r.post("/api/entities", requireAuth, async (req: any, res) => {
-  const hasOne = await prisma.entity.findFirst({ where: { userId: req.userId } });
-  if (hasOne) return res.status(400).json({ error: "Ya existe una entidad para este usuario" });
+  if (!ent) return res.status(404).json({ ok: false, error: "Entidad no encontrada" });
 
-  const { name, data } = req.body || {};
-  // Mapeo a columnas normalizadas
-  const telefono = data?.telefono ?? data?.phone ?? null;
-  const correo = data?.correo ?? null;
-  const web = data?.web ?? null;
-  const direccion = data?.direccion ?? null;
-  const tipoEntidad = data?.tipoEntidad ?? null;
-  const fechaConstitucion = data?.fechaConstitucion ?? null;
-  const municipioConstitucion = data?.municipioConstitucion ?? null;
-  const representanteLegal = data?.representanteLegal ?? null;
-  const numeroComercial = data?.numeroComercial ?? null;
-  const nit = data?.nit ?? null;
-  const nacionalOExtranjera = data?.nacionalOExtranjera ?? null;
+  // Derivar campos útiles que quizá estén en ent.data (opcional)
+  const d: any = ent.data || {};
+  const derived = {
+    // si en el form guardaste esto dentro de 'data'
+    pais: d.pais ?? null,
+    departamento: d.departamento ?? null,
+    ciudad: d.ciudad ?? null,
+  };
 
-  const e = await prisma.entity.create({
+  return res.json({
+    ok: true,
     data: {
-      userId: req.userId,
-      name,
-      data,
-      status: "ENVIADO",
-      telefono, correo, web, direccion, tipoEntidad, fechaConstitucion, municipioConstitucion,
-      representanteLegal, numeroComercial, nit, nacionalOExtranjera
-    }
+      ...ent,
+      ...derived,
+    },
   });
-  await prisma.historyEntry.create({ data: { userId: req.userId, scope: "entity", action: "submit", title: "Envío entidad", snapshot: data, status: "ENVIADO" } });
-  res.json(e);
 });
+
+
+// ✅ Reemplazo (no-op)
+r.post("/api/entities/draft", requireAuth, async (_req: any, res) => {
+  res.json({ ok: true }); });// sin escribir history
+
+// POST /api/entities
+r.post("/api/entities", requireAuth, async (req: any, res) => {
+  const userId: string = req.userId;
+
+  // Evita duplicados: 1 entidad por usuario
+  const hasOne = await prisma.entity.findFirst({ where: { userId } });
+  if (hasOne) {
+    return res.status(400).json({ error: "Ya existe una entidad para este usuario" });
+  }
+
+  // Body esperado: { name: string, data: any, draftKey: string }
+  const { name, data, draftKey } = req.body || {};
+  if (!name || typeof name !== "string" || !name.trim()) {
+    return res.status(400).json({ error: "Falta 'name' en el body" });
+  }
+  if (!draftKey || typeof draftKey !== "string") {
+    return res.status(400).json({ error: "Falta 'draftKey' en el body" });
+  }
+
+  // ====== Mapeo a columnas normalizadas ======
+  const telefono              = data?.telefono ?? data?.phone ?? null;
+  const correo                = data?.correo ?? null;
+  const web                   = data?.web ?? null;
+  const direccion             = data?.direccion ?? null;
+  const tipoEntidad           = data?.tipoEntidad ?? null;
+  const fechaConstitucion     = data?.fechaConstitucion ?? null;
+  const municipioConstitucion = data?.municipioConstitucion ?? null;
+  const representanteLegal    = data?.representanteLegal ?? null;
+  const numeroComercial       = data?.numeroComercial ?? null;
+  const nit                   = data?.nit ?? null;
+  const nacionalOExtranjera   = data?.nacionalOExtranjera ?? null;
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // 1) Crear entidad
+      const entity = await tx.entity.create({
+        data: {
+          userId,
+          name: name.trim(),
+          data,
+          status: "ENVIADO",
+          telefono,
+          correo,
+          web,
+          direccion,
+          tipoEntidad,
+          fechaConstitucion,
+          municipioConstitucion,
+          representanteLegal,
+          numeroComercial,
+          nit,
+          nacionalOExtranjera,
+        },
+      });
+
+      // 2) Reasignar archivos del draft a la entidad
+      const reassigned = await tx.file.updateMany({
+        where: {
+          draftKey,
+          createdByUserId: userId, // asegura que solo muevas archivos del usuario autenticado
+        },
+        data: {
+          entityId: entity.id,  // 🔗 vincula con la entidad
+          entityName: name,     // opcional: desnormalización para tu UI
+          draftKey: null,       // limpia el borrador
+        },
+      });
+
+      // (Opcional) log útil de depuración; HistoryEntry está @@ignore en tu schema
+      if (reassigned.count === 0) {
+        console.warn(
+          `[files] No se reasignaron archivos (draftKey=${draftKey}, userId=${userId}). ` +
+          `Verifica que FileUpload envíe draftKey y createdByUserId correctamente.`
+        );
+      }
+
+      return { entity, reassignedCount: reassigned.count };
+    });
+
+    // Devuelve solo la entidad (o incluye el count si te sirve en el front)
+    return res.json(result.entity);
+  } catch (err) {
+    console.error("POST /api/entities error:", err);
+    return res.status(500).json({ error: "Error al crear la entidad" });
+  }
+});
+
 
 r.post("/api/entities/:id/request-change", requireAuth, async (req: any, res) => {
   const id = req.params.id;
   const e = await prisma.entity.findFirst({ where: { id, userId: req.userId } });
   if (!e) return res.status(404).json({ error: "No encontrado" });
-  await prisma.historyEntry.create({ data: { userId: req.userId, scope: "entity", action: "request-change", title: "Solicitud modificación entidad", snapshot: e.data } });
   res.json({ ok: true });
 });
 
@@ -387,10 +645,27 @@ r.get("/api/projects/mine", requireAuth, async (req: any, res) => {
   res.json(items);
 });
 
-r.post("/api/projects/draft", requireAuth, async (req: any, res) => {
-  await prisma.historyEntry.create({
-    data: { userId: req.userId, scope: "project", action: "draft-save", title: "Borrador proyecto", snapshot: req.body?.data || {} },
+r.get("/api/projects/:id/profile", requireAuth, requireStaff, async (req: any, res) => {
+  const id = String(req.params.id);
+  const proj = await prisma.project.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      status: true,
+      title: true,
+      summary: true,
+      data: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
+  if (!proj) return res.status(404).json({ ok: false, error: "Proyecto no encontrado" });
+  res.json({ ok: true, data: proj });
+});
+
+
+r.post("/api/projects/draft", requireAuth, async (req: any, res) => {
+  
   res.json({ ok: true });
 });
 
@@ -416,57 +691,105 @@ r.post("/api/projects", requireAuth, async (req: any, res) => {
       titularMedida, representanteLegal, numeroIdentidad, numeroDocNotariado, modeloMercado, areaProyecto
     }
   });
-  await prisma.historyEntry.create({ data: { userId: req.userId, scope: "project", action: "submit", title: `Envío proyecto: ${title}`, snapshot: data, status: "ENVIADO" } });
+  
   res.json(p);
 });
 
 r.post("/api/projects/:id/request-change", requireAuth, async (req: any, res) => {
   const p = await prisma.project.findFirst({ where: { id: req.params.id, userId: req.userId } });
   if (!p) return res.status(404).json({ error: "No encontrado" });
-  await prisma.historyEntry.create({ data: { userId: req.userId, scope: "project", action: "request-change", title: `Solicitud modificación proyecto: ${p.title}`, snapshot: p.data } });
   res.json({ ok: true });
 });
 
 /* ============================ UPLOADS ============================ */
+// Sube hasta 30 archivos en el campo "files"
 r.post("/api/upload", requireAuth, upload.array("files", 30), async (req: any, res) => {
-  const files = req.files as Express.Multer.File[] || [];
-  const out: any[] = [];
-  const { fieldKey } = req.body;
-  for (const f of files) {
-    const { key, url } = await storeFile(f.buffer, f.originalname, f.mimetype);
-    const rec = await prisma.file.create({
-      data: { userId: req.userId, key, url, name: f.originalname, size: f.size, mime: f.mimetype,fieldKey}
-    });
-    out.push({ id: rec.id, name: rec.name, url: rec.url, size: rec.size, mime: rec.mime,
-      fieldKey: rec.fieldKey });
+  try {
+    const userId: string = req.userId;
+
+    // 👇 Con multipart/form-data llegan como strings en req.body
+    const draftKey = String(req.body.draftKey || "");
+    const fieldKey = String(req.body.fieldKey || "");
+    const docType = String(req.body.docType || "");
+
+    if (!fieldKey) {
+      return res.status(400).json({ error: "Falta 'fieldKey' en el body del form-data" });
+    }
+    if (!draftKey) {
+      // Recomendado: exigir draftKey para poder reasignar luego
+      return res.status(400).json({ error: "Falta 'draftKey' en el body del form-data" });
+    }
+
+    const files = (req.files as Express.Multer.File[]) || [];
+    if (!files.length) {
+      return res.status(400).json({ error: "No se recibieron archivos (campo 'files')" });
+    }
+
+    const out: any[] = [];
+
+    for (const f of files) {
+      const { key, url } = await storeFile(f.buffer, f.originalname, f.mimetype);
+
+      const rec = await prisma.file.create({
+        data: {
+          
+          draftKey,
+          fieldKey,
+          createdByUserId: userId, // MUY importante
+          
+          // datos del archivo
+          key,
+          url,
+          name: f.originalname,
+          size: f.size ?? null,
+          mime: f.mimetype ?? null,
+
+          // Asegúrate de NO setear entityId/Name aquí (se asignan al enviar el formulario)
+          entityId: null,
+          entityName: null,
+          
+        },
+      });
+
+      out.push({
+        id: rec.id,
+        name: rec.name,
+        url: rec.url,
+        size: rec.size,
+        mime: rec.mime,
+        fieldKey: rec.fieldKey,
+        draftKey: rec.draftKey,
+        docType: rec.docType,
+      });
+    }
+
+    return res.json({ files: out });
+  } catch (err) {
+    console.error("POST /api/upload error:", err);
+    return res.status(500).json({ error: "Error al subir archivo(s)" });
   }
-  res.json({ files: out });
 });
+
 
 /* ============================ HISTORIAL & BANDEJA ============================ */
-r.get("/api/history/mine", requireAuth, async (req: any, res) => {
-  const items = await prisma.historyEntry.findMany({
-    where: { userId: req.userId },
-    orderBy: { createdAt: "desc" }
-  });
-  res.json({ items });
+// HISTORY — STUBS SIN BD
+r.get("/api/history/mine", requireAuth, async (_req: any, res) => {
+  // Devolvemos la misma forma { items: [...] } pero vacío, sin consultar Prisma.
+  res.json({ items: [] });
 });
 
-r.post("/api/history/add", requireAuth, async (req: any, res) => {
-  const { scope, action, snapshot, title, status, pdfUrl } = req.body || {};
-  const h = await prisma.historyEntry.create({
-    data: { userId: req.userId, scope, action, snapshot, title: title || action, status, pdfUrl }
-  });
-  res.json({ ok: true, id: h.id });
+r.post("/api/history/add", requireAuth, async (_req: any, res) => {
+  // Aceptamos la llamada y devolvemos OK para no romper el front.
+  // Si el front usa id, devolvemos un id sintético.
+  const fakeId = `HIST-${Date.now()}`;
+  res.json({ ok: true, id: fakeId });
 });
 
-r.get("/api/inbox", requireAuth, async (req: any, res) => {
-  const items = await prisma.inboxItem.findMany({
-    where: { userId: req.userId },
-    orderBy: { createdAt: "desc" }
-  });
-  res.json({ items });
+// INBOX — STUB SIN BD
+r.get("/api/inbox", requireAuth, async (_req: any, res) => {
+  res.json({ items: [] });
 });
+
 
 /* ============================ GENERAR PDF ============================ */
 /** Genera un PDF con el snapshot enviado y lo guarda en disco/S3.
@@ -482,12 +805,6 @@ r.post("/api/pdf/generate", requireAuth, async (req: any, res) => {
     doc.on("end", async () => {
       const buf = Buffer.concat(chunks);
       const { url } = await storeFile(buf, `${Date.now()}-reporte.pdf`, "application/pdf");
-      // opcional: guardar en historial
-      if (scope && action) {
-        await prisma.historyEntry.create({
-          data: { userId: req.userId, scope, action, title, snapshot, pdfUrl: url }
-        });
-      }
       res.json({ ok: true, pdfUrl: url });
     });
 

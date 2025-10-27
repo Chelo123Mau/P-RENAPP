@@ -19,6 +19,13 @@ const statusLabel = (s?: string) =>
   s === "observaciones" ? "Observado (con observaciones)" :
   s === "solicitud_mod_registro" ? "Solicitud de modificación (registro)" : (s || "-");
 
+function mkId() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0, v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
   /* ==========================
    Helper: generar PDF en servidor
    ========================== */
@@ -147,6 +154,19 @@ export default function Panel() {
   const [tab, setTab] = useState<"user" | "entity" | "projects" | "history">("user");
   const [msg, setMsg] = useState("");
 
+  // ====== [PATCH] draftKey compartido para todo el Panel ======
+
+
+const [draftKey, setDraftKey] = React.useState(() => {
+  const k = localStorage.getItem('entityDraftKey');
+  if (k) return k;
+  const n = mkId();
+  localStorage.setItem('entityDraftKey', n);
+  return n;
+});
+// ====== [/PATCH] =================================================
+
+
   const onLogout = () => {
     const ok = window.confirm("¿Estás seguro de que deseas cerrar sesión?");
     if (!ok) return;
@@ -181,10 +201,10 @@ export default function Panel() {
 
       {/* CONTENIDO */}
       <main className="p-6">
-        {tab === "user" && <UserDataSection setMsg={setMsg} />}
-        {tab === "entity" && <EntitySection setMsg={setMsg} />}
-        {tab === "projects" && <ProjectsSection setMsg={setMsg} />}
-        {tab === "history" && <HistorySection setMsg={setMsg} />}
+        {tab === "user" && <UserDataSection draftKey={draftKey} setMsg={setMsg}/>}
+        {tab === "entity" && <EntitySection draftKey={draftKey} setDraftKey={setDraftKey} setMsg={setMsg} />}
+        {tab === "projects" && <ProjectsSection draftKey={draftKey} setDraftKey={setDraftKey} setMsg={setMsg}/>}
+        {tab === "history" && <HistorySection draftKey={draftKey} setMsg={setMsg}/>}
       </main>
     </div>
   );
@@ -240,7 +260,6 @@ function UserDataSection({ setMsg }:{ setMsg: (m:string)=>void }) {
     setMsg,
   });
 };
-
 
   const requestChange = async () => {
     const ok = window.confirm(
@@ -308,10 +327,20 @@ function UserDataSection({ setMsg }:{ setMsg: (m:string)=>void }) {
   );
 }
 
+
+
 /* =======================================================
    Sección: Entidad registrada (1 por usuario) + imprimir + solicitar modificación
    ======================================================= */
-function EntitySection({ setMsg }:{ setMsg: (m:string)=>void }) {
+function EntitySection({
+  setMsg,
+  draftKey,
+  setDraftKey,
+}: {
+  setMsg: (m: string) => void;
+  draftKey: string;
+  setDraftKey: React.Dispatch<React.SetStateAction<string>>;
+}) {
   const [loading, setLoading] = useState(true);
   const [entity, setEntity] = useState<any | null>(null);
   const [status, setStatus] = useState<Status>("borrador");
@@ -353,20 +382,54 @@ function EntitySection({ setMsg }:{ setMsg: (m:string)=>void }) {
   };
 
   const submitEntity = async () => {
-    if (!window.confirm("¿Enviar formulario de entidad?")) return;
-    setMsg("Enviando entidad…");
-    try {
-      const r = await authJson("/api/entities", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: form.nombreInstitucion, data: form }),
-      });
-      if (!r.ok) throw new Error(r.data?.error || `Error ${r.status}`);
-      setEntity(r.data);
-      setStatus("enviado");
-      setMsg("✅ Enviado para revisión");
-      await authJson("/api/history/add", { method: "POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ scope:"entity", action:"submit", snapshot: form, title:"Envío de entidad" }) });
-    } catch (e:any) { setMsg("❌ " + (e?.message || "No se pudo enviar")); }
-  };
+  if (!window.confirm("¿Enviar formulario de entidad?")) return;
+  setMsg("Enviando entidad…");
+  try {
+    const payload = {
+      // usa "name" si tu backend espera "name"; si espera "nombre", cambia la clave aquí
+      name: form.nombreInstitucion?.trim(),
+      data: form,
+      draftKey, // 👈 CLAVE: el puente para reasignar los archivos
+    };
+
+    if (!payload.name) {
+      setMsg("❌ Debe completar el nombre de la entidad");
+      return;
+    }
+
+    const r = await authJson("/api/entities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(r.data?.error || `Error ${r.status}`);
+
+    setEntity(r.data);
+    setStatus("enviado");
+    setMsg("✅ Enviado para revisión");
+
+    // historial (igual que tenías)
+    await authJson("/api/history/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "entity",
+        action: "submit",
+        snapshot: form,
+        title: "Envío de entidad",
+      }),
+    });
+
+    // 👇 Limpia el draftKey y crea uno nuevo por si arranca otra entidad
+    localStorage.removeItem("entityDraftKey");
+    const next = mkId();
+    localStorage.setItem("entityDraftKey", next);
+    setDraftKey(next);
+  } catch (e: any) {
+    setMsg("❌ " + (e?.message || "No se pudo enviar"));
+  }
+};
+
 
  const printEntity = async () => {
   const data = entity ? (entity.data || entity) : form;
@@ -451,13 +514,13 @@ function EntitySection({ setMsg }:{ setMsg: (m:string)=>void }) {
 
         {/* Adjuntos */}
         <div className="grid md:grid-cols-2 gap-4">
-          <FileUpload label="Documento legal que respalde la denominación" onUploaded={(files)=>onChange("docDenominacion", [...form.docDenominacion, ...files])} />
-          <FileUpload label="Documento de constitución o acta notariada" onUploaded={(files)=>onChange("docConstitucion", [...form.docConstitucion, ...files])} />
-          <FileUpload label="Poder notariado / Acta de designación" onUploaded={(files)=>onChange("docPoderNotariado", [...form.docPoderNotariado, ...files])} />
-          <FileUpload label="Certificado de registro comercial (FUNDEMPRESA)" onUploaded={(files)=>onChange("docRegistroComercial", [...form.docRegistroComercial, ...files])} />
-          <FileUpload label="Copia del NIT" onUploaded={(files)=>onChange("docNIT", [...form.docNIT, ...files])} />
+          <FileUpload label="Documento legal que respalde la denominación" fieldKey="docDenominacion" draftKey={draftKey} onUploaded={(files)=>onChange("docDenominacion", [...form.docDenominacion, ...files])} />
+          <FileUpload label="Documento de constitución o acta notariada" fieldKey="docConstitucion" draftKey={draftKey} onUploaded={(files)=>onChange("docConstitucion", [...form.docConstitucion, ...files])} />
+          <FileUpload label="Poder notariado / Acta de designación" fieldKey="docPoderNotariado" draftKey={draftKey} onUploaded={(files)=>onChange("docPoderNotariado", [...form.docPoderNotariado, ...files])} />
+          <FileUpload label="Certificado de registro comercial (FUNDEMPRESA)" fieldKey="docRegistroComercial" draftKey={draftKey} onUploaded={(files)=>onChange("docRegistroComercial", [...form.docRegistroComercial, ...files])} />
+          <FileUpload label="Copia del NIT" fieldKey="docNIT" draftKey={draftKey} onUploaded={(files)=>onChange("docNIT", [...form.docNIT, ...files])} />
           {form.nacionalOExtranjera === "extranjera" && (
-            <FileUpload label="Constitución en el país (si extranjera)" onUploaded={(files)=>onChange("docExtranjera", [...form.docExtranjera, ...files])} />
+          <FileUpload label="Constitución en el país (si extranjera)" fieldKey="docExtranjera" draftKey={draftKey} onUploaded={(files)=>onChange("docExtranjera", [...form.docExtranjera, ...files])} />
           )}
         </div>
 
@@ -483,7 +546,15 @@ function EntitySection({ setMsg }:{ setMsg: (m:string)=>void }) {
 /* =======================================================
    Sección: Proyectos / Programas + imprimir + solicitar modificación
    ======================================================= */
-function ProjectsSection({ setMsg }:{ setMsg: (m:string)=>void }) {
+function ProjectsSection({
+  draftKey,
+  setDraftKey,
+  setMsg,
+}: {
+  draftKey: string;
+  setDraftKey: React.Dispatch<React.SetStateAction<string>>;
+  setMsg: (m: string) => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [entityExists, setEntityExists] = useState(false);
   const [items, setItems] = useState<any[]>([]);
@@ -531,17 +602,31 @@ function ProjectsSection({ setMsg }:{ setMsg: (m:string)=>void }) {
     try {
       const r = await authJson("/api/projects", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: form.nombreProyecto, summary: form.modeloMercado, data: form }),
+        body: JSON.stringify({
+  title: form.nombreProyecto,
+  summary: form.modeloMercado,
+  data: form,
+  draftKey,                // 👈 igual que en entidades
+}),
       });
       if (!r.ok) throw new Error(r.data?.error || `Error ${r.status}`);
       setItems((prev)=>[...(prev||[]), r.data]);
       setForm((f:any)=>({ ...f, nombreProyecto:"", modeloMercado:"" }));
       setStatusMsg("✅ Enviado para revisión");
       await authJson("/api/history/add", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ scope:"project", action:"submit", snapshot: form, title:"Envío de proyecto" }) });
+
+    
+
     } catch (e:any) { setStatusMsg("❌ " + (e?.message || "No se pudo enviar")); }
     finally { setMsg(""); }
+
+    localStorage.removeItem("entityDraftKey");
+    const next = mkId();
+    localStorage.setItem("entityDraftKey", next);
+    setDraftKey(next);
   };
 
+  
  const printProjectDraft = async () => {
   await generateServerPdf({
     title: "Proyecto — Reporte (borrador)",
@@ -605,16 +690,71 @@ function ProjectsSection({ setMsg }:{ setMsg: (m:string)=>void }) {
 
         {/* Adjuntos requeridos */}
         <div className="grid md:grid-cols-2 gap-4">
-          <FileUpload label="Documento de titularidad / resolución" onUploaded={(f)=>onChange("docTitularidad", [...form.docTitularidad, ...f])} />
-          <FileUpload label="Poder notariado (representación legal)" onUploaded={(f)=>onChange("docPoderNotariado", [...form.docPoderNotariado, ...f])} />
-          <FileUpload label="Copia de CI del representante" onUploaded={(f)=>onChange("docIdentidad", [...form.docIdentidad, ...f])} />
-          <FileUpload label="Copia de licencia ambiental (si aplica)" onUploaded={(f)=>onChange("docLicenciaAmbiental", [...form.docLicenciaAmbiental, ...f])} />
-          <FileUpload label="DDMM aprobado por OVV" onUploaded={(f)=>onChange("docDDMM_OVV", [...form.docDDMM_OVV, ...f])} />
-          <FileUpload label="Reporte de validación del OVV" onUploaded={(f)=>onChange("docReporteValidacion", [...form.docReporteValidacion, ...f])} />
-          <FileUpload label="Actas y documentación de consultas" onUploaded={(f)=>onChange("docActasConsultas", [...form.docActasConsultas, ...f])} />
-          <FileUpload label="Mapa o croquis de localización" onUploaded={(f)=>onChange("docMapaCroquis", [...form.docMapaCroquis, ...f])} />
-          <FileUpload label="PPM / PASA" onUploaded={(f)=>onChange("ppmPasa", [...form.ppmPasa, ...f])} />
-        </div>
+  <FileUpload
+    label="Documento de titularidad / resolución"
+    fieldKey="docTitularidad"            // 👈 clave interna
+    draftKey={draftKey}
+    docType="PROYECTO"                  // 👈 igual que entidades
+    onUploaded={(f)=>onChange("docTitularidad", [...form.docTitularidad, ...f])}
+  />
+  <FileUpload
+    label="Poder notariado (representación legal)"
+    fieldKey="docPoderNotariado"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("docPoderNotariado", [...form.docPoderNotariado, ...f])}
+  />
+  <FileUpload
+    label="Copia de CI del representante"
+    fieldKey="docIdentidad"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("docIdentidad", [...form.docIdentidad, ...f])}
+  />
+  <FileUpload
+    label="Copia de licencia ambiental (si aplica)"
+    fieldKey="docLicenciaAmbiental"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("docLicenciaAmbiental", [...form.docLicenciaAmbiental, ...f])}
+  />
+  <FileUpload
+    label="DDMM aprobado por OVV"
+    fieldKey="docDDMM_OVV"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("docDDMM_OVV", [...form.docDDMM_OVV, ...f])}
+  />
+  <FileUpload
+    label="Reporte de validación del OVV"
+    fieldKey="docReporteValidacion"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("docReporteValidacion", [...form.docReporteValidacion, ...f])}
+  />
+  <FileUpload
+    label="Actas y documentación de consultas"
+    fieldKey="docActasConsultas"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("docActasConsultas", [...form.docActasConsultas, ...f])}
+  />
+  <FileUpload
+    label="Mapa o croquis de localización"
+    fieldKey="docMapaCroquis"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("docMapaCroquis", [...form.docMapaCroquis, ...f])}
+  />
+  <FileUpload
+    label="PPM / PASA"
+    fieldKey="ppmPasa"
+    draftKey={draftKey}
+    docType="PROYECTO"
+    onUploaded={(f)=>onChange("ppmPasa", [...form.ppmPasa, ...f])}
+  />
+</div>
+
 
         <div className="flex gap-2 pt-2">
           <button onClick={printProjectDraft} className="bg-gray-700 hover:bg-gray-600 rounded-xl px-4 py-2" disabled={!entityExists}>
@@ -788,32 +928,64 @@ function Select({ label, value, onChange, options }:{
 /* ==========================================
    Subida de archivos (/api/upload, campo "files")
    ========================================== */
+
+function getToken(): string | null {
+  const raw = localStorage.getItem("token");
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
 function FileUpload({
   label,
+  fieldKey, draftKey,
+  docType,
   onUploaded,
   multiple = true,
 }: {
   label: string;
+  fieldKey: string;
+  draftKey: string;
+  docType?: "USUARIO" | "ENTIDAD" | "PROYECTO";
   onUploaded: (items: Array<{ name: string; url: string; mime?: string; size?: number }>) => void;
   multiple?: boolean;
 }) {
   const [busy, setBusy] = React.useState(false);
+  const [uploadedNames, setUploadedNames] = React.useState<string[]>([]); // 👈 nombres mostrados al lado del botón
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:4000";
 
   const pick = () => inputRef.current?.click();
 
   const onChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
+
     const fd = new FormData();
-    Array.from(e.target.files).forEach((f) => fd.append("files", f)); // 👈 campo "files"
+    Array.from(e.target.files).forEach((f) => fd.append("files", f));
+    fd.append("fieldKey", fieldKey);
+    fd.append("draftKey", draftKey);
+    if (docType && docType.trim() !== "") {
+    fd.append("docType", docType.trim().toUpperCase());} //;
     setBusy(true);
     try {
-      const r = await authFetch("/api/upload", { method: "POST", body: fd });
-      const data = await r.json();
-      const items = Array.isArray(data?.files) ? data.files : [];
-      onUploaded(items);
-    } catch {
-      alert("No se pudo subir archivo(s).");
+      const token = getToken();
+      const res = await fetch(`${API_URL}/api/upload`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "No se pudo subir archivo(s)");
+
+      const items: Array<{ name?: string; originalName?: string; url: string }> = Array.isArray(data?.files) ? data.files : [];
+
+      // Actualiza lista visual con nombres (prefiere name, luego originalName)
+      const newNames = items.map((it) => it.name || it.originalName || "archivo");
+      setUploadedNames((prev) => [...prev, ...newNames]);
+
+      // Propaga a estado padre
+      onUploaded(items as any);
+    } catch (err: any) {
+      alert("No se pudo subir archivo(s): " + (err?.message || "Error"));
     } finally {
       setBusy(false);
       e.target.value = "";
@@ -821,9 +993,9 @@ function FileUpload({
   };
 
   return (
-    <div>
-      <div className="text-sm opacity-80 mb-1">{label}</div>
-      <div className="flex items-center gap-2">
+    <div className="space-y-1">
+      <div className="text-sm opacity-80">{label}</div>
+      <div className="flex items-center gap-3 flex-wrap">
         <button
           type="button"
           onClick={pick}
@@ -832,7 +1004,27 @@ function FileUpload({
         >
           {busy ? "Subiendo..." : "Seleccionar archivo(s)"}
         </button>
-        <input ref={inputRef} onChange={onChange} type="file" hidden multiple={multiple} />
+        {/* 👇 Nombres al lado del botón */}
+        {uploadedNames.length > 0 && (
+          <div className="text-xs opacity-80 flex gap-2 flex-wrap">
+            {uploadedNames.map((n, i) => (
+              <span
+                key={`${n}-${i}`}
+                className="px-2 py-1 bg-gray-800 rounded-lg border border-gray-700"
+                title={n}
+              >
+                {n}
+              </span>
+            ))}
+          </div>
+        )}
+        <input
+          ref={inputRef}
+          onChange={onChange}
+          type="file"
+          hidden
+          multiple={multiple}
+        />
       </div>
     </div>
   );

@@ -312,11 +312,69 @@ app.post('/api/register/user', requireAuth, (req: Request & { userId?: string },
 // ---------------------------
 /** Upload de archivos (protegido) */
 // ---------------------------
-app.post('/api/upload', requireAuth, uploader.array('files', 15), (req: Request, res: Response) => {
-  const files = (req as any).files || [];
-  const list = files.map((f: any) => fileMeta(f.path, f.originalname, f.mimetype));
-  return res.json({ files: list });
-});
+app.post(
+  "/api/upload",
+  requireAuth,
+  uploader.array("files", 15),
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.user?.id; // ← lo pone requireAuth
+      const { fieldKey, draftKey } = req.body as { fieldKey?: string; draftKey?: string };
+
+      if (!draftKey) {
+        return res.status(400).json({ ok: false, error: "draftKey requerido" });
+      }
+
+      const files = (req as any).files as Array<{
+        path: string;
+        originalname: string;
+        mimetype: string;
+        size: number;
+        filename?: string;
+      }> || [];
+
+      // Si usas almacenamiento local, probablemente 'path' sea tu URL pública;
+      // si usas S3/Render, pon aquí tu builder de URL pública.
+      const toPublicUrl = (f: typeof files[number]) => f.path;
+
+      const created = [];
+      for (const f of files) {
+        // Guarda cada archivo en la BD con el "puente" draftKey + quién lo subió
+        const row = await prisma.file.create({
+          data: {
+            fieldKey: fieldKey || null,
+            draftKey,                    // puente temporal
+            createdByUserId: userId || null,
+            originalName: f.originalname,
+            mime: f.mimetype,
+            size: f.size,
+            url: toPublicUrl(f),         // ajusta si necesitas tu URL pública
+            // NO setees entityId aquí; todavía no existe la entidad
+          },
+          select: {
+            id: true,
+            url: true,
+            mime: true,
+            size: true,
+            fieldKey: true,
+            draftKey: true,
+            entityId: true,
+            entityName: true,
+            originalName: true,
+          },
+        });
+
+        created.push(row);
+      }
+
+      return res.json({ ok: true, files: created });
+    } catch (err: any) {
+      console.error("upload error:", err);
+      return res.status(500).json({ ok: false, error: "No se pudo subir" });
+    }
+  }
+);
+
 
 // ---------------------------
 // ---------------------------
