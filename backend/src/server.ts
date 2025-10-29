@@ -92,6 +92,7 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
@@ -111,8 +112,36 @@ app.use(cors({
   allowedHeaders: ['Content-Type','Authorization']
 }));
 
+app.options("*", cors(corsOptions));
+
 app.get('/health', (_req, res) => res.sendStatus(200));
 
+// Permite Render + localhost (multi-origen por coma)
+const ALLOWED_ORIGINS = (
+  process.env.CORS_ORIGIN ||      // ← preferente (Render)
+  process.env.FRONT_ORIGIN ||     // ← compatibilidad con tu var actual
+  'http://localhost:5173'         // ← fallback dev
+)
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    // Permite requests sin origin (p.ej. curl, healthchecks)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
+  credentials: true, // pon en false si NO usas cookies
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
+// MUY IMPORTANTE: responder preflight para todas las rutas
+app.options('*', cors(corsOptions));
 
 
 // ---------------------------
