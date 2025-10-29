@@ -40,7 +40,7 @@ services:
       # - key: AWS_SECRET_ACCESS_KEY
       #   value: xxxx
     # Ejecuta migraciones en cada deploy
-    postdeployCommand: npm run prisma:migrate:deploy
+    preDeployCommand: npm run prisma:migrate:deploy
 
   # --- FRONTEND (Static Site) ---
   - type: web
