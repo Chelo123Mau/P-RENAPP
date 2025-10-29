@@ -44,7 +44,6 @@ services:
   - type: web
     name: renapp-frontend
     env: static
-    plan: free
     repo: https://github.com/Chelo123Mau/P-RENAPP
     branch: main
     rootDir: frontend
