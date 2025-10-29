@@ -10,7 +10,7 @@ services:
     rootDir: backend
     autoDeploy: true
     buildCommand: |
-      npm ci
+      npm ci --include=dev
       npm run build
       npm run prisma:generate
     startCommand: bash -lc "npm run prisma:migrate:deploy && npm run prisma:seed-admin && node dist/server.js"
