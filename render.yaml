@@ -13,7 +13,7 @@ services:
       npm ci
       npm run build
       npm run prisma:generate
-    startCommand: bash -lc "npm run prisma:migrate:deploy && node dist/server.js"
+    startCommand: bash -lc "npm run prisma:migrate:deploy && npm run prisma:seed-admin && node dist/server.js"
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
