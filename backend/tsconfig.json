@@ -11,5 +11,6 @@
     "skipLibCheck": true,
     "strict": false
   },
-  "include": ["src"]
+  
+  "include": ["src", "prisma/seedAdmin.ts"]
 }
