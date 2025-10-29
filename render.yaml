@@ -1,23 +1,68 @@
-# render.yaml (en la raíz del monorepo)
 services:
+  # --- BACKEND (Web Service) ---
   - type: web
     name: renapp-backend
     env: node
+    plan: free
+    region: oregon
+    repo: https://github.com/Chelo123Mau/P-RENAPP
+    branch: main
     rootDir: backend
-    buildCommand: "npm install && npm run build"
-    startCommand: "npm start"
     autoDeploy: true
+    buildCommand: |
+      npm ci
+      npm run build
+      npm run prisma:generate
+    startCommand: node dist/server.js
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: FRONT_ORIGIN
+      - key: DATABASE_URL
+        fromDatabase:
+          name: renapp-db
+          property: connectionString
+      - key: CORS_ORIGIN
+        # Render URL del frontend (se completa al crear el frontend). 
+        # Puedes dejarla vacía por ahora y volver a editar.
         value: https://renapp-frontend.onrender.com
+      # Si usas JWT/Email/S3, añade aquí:
+      # - key: JWT_SECRET
+      #   generateValue: true
+      # - key: SMTP_URL
+      #   value: smtp://USER:PASS@HOST:587
+      # - key: AWS_REGION
+      #   value: us-east-1
+      # - key: S3_BUCKET
+      #   value: tu-bucket
+      # - key: AWS_ACCESS_KEY_ID
+      #   value: xxxx
+      # - key: AWS_SECRET_ACCESS_KEY
+      #   value: xxxx
+    # Ejecuta migraciones en cada deploy
+    postdeployCommand: npm run prisma:migrate:deploy
 
+  # --- FRONTEND (Static Site) ---
   - type: static
     name: renapp-frontend
+    plan: free
+    region: oregon
+    repo: https://github.com/Chelo123Mau/P-RENAPP
+    branch: main
     rootDir: frontend
-    buildCommand: "npm install && npm run build"
+    buildCommand: npm ci && npm run build
     staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
+      # URL pública del backend. Cuando el backend esté arriba,
+      # ajusta este valor a su dominio de Render o tu custom domain.
       - key: VITE_API_URL
         value: https://renapp-backend.onrender.com
+
+databases:
+  - name: renapp-db
+    plan: free
+

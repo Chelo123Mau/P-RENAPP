@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import { useNavigate } from 'react-router-dom';
 import { SectionTitle, Field, UploadPerField } from '../components/FormPieces';
 
-
 type Archivo = {
-  id: string;
-  name: string;
-  url: string;
-  size: number;
-  mime: string;
+id: string;
+name: string;
+url: string;
+size: number;
+mime: string;
+fieldKey: string;
+docType: "USUARIO"|"ENTIDAD"|"PROYECTO"|"OVV"|"ESTANDAR"|"METODOLOGIA"; 
+draftKey?: string | null;
 };
 
 function getToken(): string | null {
@@ -23,7 +25,6 @@ function authHeaders(extra?: HeadersInit): Headers {
   if (t) h.set('Authorization', `Bearer ${t}`);
   return h;
 }
-
 const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:4000";
 
 async function authJson(path: string, init: RequestInit = {}) {
@@ -37,22 +38,44 @@ async function authJson(path: string, init: RequestInit = {}) {
   return { ok: res.ok, status: res.status, data };
 }
 
-async function uploadFiles(files: FileList, fieldKey: string) {
+// uploadFiles sube archivos y devuelve metadatos
+async function uploadFiles(
+  files: FileList | File[],
+  fieldKey: string,
+  opts?: { docType?: "USUARIO"|"ENTIDAD"|"PROYECTO"|"OVV"|"ESTANDAR"|"METODOLOGIA"; draftKey?: string }
+): Promise<Archivo[]> {
   const fd = new FormData();
-  Array.from(files).forEach((f) => fd.append("files", f));
-  fd.append("fieldKey", fieldKey); // 👈 manda el nombre del campo
+  Array.from(files as any).forEach((f: File) => fd.append("files", f)); // Multer espera "files"
+  fd.append("fieldKey", fieldKey);
+
+  // En RegisterUser NO mandamos docType → Prisma aplica default USUARIO
+  // (pero dejamos la opción para futuros formularios)
+  if (opts?.docType && opts.docType.trim() !== "") {
+    fd.append("docType", opts.docType.trim().toUpperCase());
+  }
+  if (opts?.draftKey && opts.draftKey.trim() !== "") {
+    fd.append("draftKey", opts.draftKey.trim());
+  }
 
   const token = getToken();
-  const res = await fetch(`${API_URL}/api/upload`, {
+  const r = await fetch(`${API_URL}/api/upload`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: fd,
   });
 
-  const d = await res.json();
-  if (!res.ok) throw new Error(d?.error || "No se pudo subir");
-  return d.files as Archivo[];
+  if (!r.ok) {
+    let msg = `Error subiendo archivos (${r.status})`;
+    try { const j = await r.json(); if (j?.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
+  const json = await r.json();
+  return Array.isArray(json?.files) ? json.files as Archivo[] : [];
 }
+
+
+
+
 
 
 export default function RegisterUser() {
@@ -119,26 +142,38 @@ useEffect(() => {
   })();
 }, []);
 
-
+function setField<K extends keyof typeof f>(name: K, value: (typeof f)[K]) {
+  setF((prev) => ({ ...prev, [name]: value }));
+}
 
 
   const [docs, setDocs] = useState<Archivo[]>([]); // adjuntos generales
   const [docsPorCampo, setDocsPorCampo] = useState<Record<string, Archivo[]>>({});
 
-  const setField = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setF((p) => ({ ...p, [k]: e.target.value }));
-
   const handleUploadPerField = async (key: string, files: FileList) => {
-    const ups = await uploadFiles(files,key);
+  try {
+    setMsg(`Subiendo ${key}...`);
+    const ups = await uploadFiles(files, key); // 👈 SIN docType aquí
     setDocsPorCampo((prev) => ({ ...prev, [key]: [ ...(prev[key] || []), ...ups ] }));
-  };
+    setMsg(`✅ ${key} subido`);
+  } catch (err: any) {
+    setMsg("❌ " + (err?.message || `Error subiendo ${key}`));
+  }
+};
 
-  const API_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:4000";
+  
 
  const submit = async (e: React.FormEvent) => {
   e.preventDefault();
   setMsg("");
 
+  // 🟡 Ventana de confirmación antes de enviar
+  const confirmar = window.confirm(
+    "Se enviará el formulario para su revisión.\n" +
+    "Una vez enviado, no podrá modificar los datos hasta que un revisor lo apruebe.\n\n" +
+    "Será redirigido a la página de ingreso (login).\n\n¿Desea continuar?"
+  );
+  if (!confirmar) return; // Si el usuario presiona "Cancelar", no hace nada// 🟡 Ventana de confirmación antes de enviar
   try {
     const token = getToken();
     if (!token) { setMsg("Tu sesión no está activa. Inicia sesión nuevamente."); nav("/login", { replace: true }); return; }
@@ -166,15 +201,16 @@ useEffect(() => {
       method: "POST",
       body: JSON.stringify({ data: payload }),
     });
-    if (!d.ok) throw new Error(d.data?.error || `Error guardando borrador (${d.status})`);
+    if (!d.ok) throw new Error(d.data?.error || `Error guardando datos (${d.status})`);
 
     // 2) Enviar (esto crea/actualiza UserProfile a ENVIADO → el revisor lo ve)
     const s = await authJson("/api/register/user/submit", { method: "POST" });
     if (!s.ok) throw new Error(s.data?.error || `Error al enviar (${s.status})`);
 
     setMsg("✅ Enviado para revisión. Un revisor debe aprobarte.");
-    // (opcional) Redirigir a panel o a una pantalla de “enviado”
-    // nav("/panel", { replace: true });
+    setTimeout(() => {
+      nav("/login", { replace: true });
+    }, 2000);
   } catch (err: any) {
     setMsg("❌ " + (err?.message || "Error al registrar"));
   }
@@ -242,112 +278,170 @@ const guardarBorrador = async () => {
         />
 
         <form onSubmit={submit} className="form-grid">
-          <Field
-            label="1. Nombre(s)*"
-            desc="Como se muestra en su documento de identificación"
-            required
-          >
-            <input className="input" value={f.nombres} onChange={setField('nombres')} />
-          </Field>
+  <Field
+    label="1. Nombre(s)*"
+    desc="Como se muestra en su documento de identificación"
+    required
+  >
+    <input
+      className="input"
+      value={f.nombres || ""}
+      onChange={(e) => setField("nombres", e.target.value)}
+    />
+  </Field>
 
-          <Field
-            label="2. Apellido(s)*"
-            desc="Como se muestra en su documento de identificación"
-            required
-          >
-            <input className="input" value={f.apellidos} onChange={setField('apellidos')} />
-          </Field>
+  <Field
+    label="2. Apellido(s)*"
+    desc="Como se muestra en su documento de identificación"
+    required
+  >
+    <input
+      className="input"
+      value={f.apellidos || ""}
+      onChange={(e) => setField("apellidos", e.target.value)}
+    />
+  </Field>
 
-          <Field
-            label="3. Dirección de correo electrónico *"
-            desc="Correo personal o institucional donde desea recibir notificaciones"
-            required
-          >
-            <input className="input" type="email" value={f.email} onChange={setField('email')} />
-          </Field>
+  <Field
+    label="3. Dirección de correo electrónico *"
+    desc="Correo personal o institucional donde desea recibir notificaciones"
+    required
+  >
+    <input
+      className="input"
+      type="email"
+      value={f.email || ""}
+      onChange={(e) => setField("email", e.target.value)}
+    />
+  </Field>
 
-          <Field
-            label="4. Teléfono *"
-            desc="Incluya código de país si corresponde"
-            required
-          >
-            <input className="input" type="tel" value={f.telefono} onChange={setField('telefono')} />
-          </Field>
+  <Field
+    label="4. Teléfono *"
+    desc="Incluya código de país si corresponde"
+    required
+  >
+    <input
+      className="input"
+      type="tel"
+      value={f.telefono || ""}
+      onChange={(e) => setField("telefono", e.target.value)}
+    />
+  </Field>
 
-          <Field
-            label="5. Cédula de identidad *"
-            desc="Número completo del documento de identidad"
-            required
-          >
-            <input className="input" value={f.ci} onChange={setField('ci')} />
-            <UploadPerField onUpload={(files)=>handleUploadPerField('doc_ci', files)} />
-          </Field>
+  <Field
+    label="5. Cédula de identidad *"
+    desc="Número completo del documento de identidad"
+    required
+  >
+    <input
+      className="input"
+      value={f.ci || ""}
+      onChange={(e) => setField("ci", e.target.value)}
+    />
+    <UploadPerField onUpload={(files) => handleUploadPerField("doc_ci", files)} />
+  </Field>
 
-          <Field
-            label="6. Documento de antecedentes penales"
-            desc="Certificado vigente emitido por autoridad competente (REJAP)"
-          >
-            <UploadPerField onUpload={(files)=>handleUploadPerField('doc_antecedentes', files)} />
-          </Field>
+  <Field
+    label="6. Documento de antecedentes penales"
+    desc="Certificado vigente emitido por autoridad competente (REJAP)"
+  >
+    <UploadPerField onUpload={(files) => handleUploadPerField("doc_antecedentes", files)} />
+  </Field>
 
-          <Field
-            label="7. Cargo que ocupa / Relación laboral"
-            desc="Cargo/función y tipo de vínculo laboral o contractual"
-          >
-            <input className="input" value={f.cargoRelacion} onChange={setField('cargoRelacion')} />
-            <UploadPerField onUpload={(files)=>handleUploadPerField('doc_cargo', files)} />
-          </Field>
+  <Field
+    label="7. Cargo que ocupa / Relación laboral"
+    desc="Cargo/función y tipo de vínculo laboral o contractual"
+  >
+    <input
+      className="input"
+      value={f.cargoRelacion || ""}
+      onChange={(e) => setField("cargoRelacion", e.target.value)}
+    />
+    <UploadPerField onUpload={(files) => handleUploadPerField("doc_cargo", files)} />
+  </Field>
 
-          <Field
-            label="8. Entidad a la que representa *"
-            desc="Nombre completo de la institución a la cual pertenece"
-            required
-          >
-            <input className="input" value={f.entidadRepresenta} onChange={setField('entidadRepresenta')} />
-          </Field>
+  <Field
+    label="8. Entidad a la que representa *"
+    desc="Nombre completo de la institución a la cual pertenece"
+    required
+  >
+    <input
+      className="input"
+      value={f.entidadRepresenta || ""}
+      onChange={(e) => setField("entidadRepresenta", e.target.value)}
+    />
+  </Field>
 
-          <Field
-            label="9. Domicilio"
-            desc="Calle, número, zona, ciudad"
-            full
-          >
-            <input className="input" value={f.domicilio} onChange={setField('domicilio')} />
-          </Field>
+  <Field
+    label="9. Domicilio"
+    desc="Calle, número, zona, ciudad"
+    full
+  >
+    <input
+      className="input"
+      value={f.domicilio || ""}
+      onChange={(e) => setField("domicilio", e.target.value)}
+    />
+  </Field>
 
+  <Field label="10. Departamento">
+    <input
+      className="input"
+      value={f.departamento || ""}
+      onChange={(e) => setField("departamento", e.target.value)}
+    />
+  </Field>
 
-          <Field label="10. Departamento" >
-            <input className="input" value={f.departamento} onChange={setField('departamento')} />
-          </Field>
+  <Field label="11. Ciudad/Municipio">
+    <input
+      className="input"
+      value={f.ciudad || ""}
+      onChange={(e) => setField("ciudad", e.target.value)}
+    />
+  </Field>
 
-          <Field label="11. Ciudad/Municipio" >
-            <input className="input" value={f.ciudad} onChange={setField('ciudad')} />
-          </Field>
+  <Field
+    label="12. Documento de acreditación de representación"
+    desc="Nota de designación o carta institucional firmada por autoridad"
+    full
+  >
+    <UploadPerField onUpload={(files) => handleUploadPerField("doc_acreditacion", files)} />
+  </Field>
 
-          <Field
-            label="12. Documento de acreditación de representación"
-            desc="Nota de designación o carta institucional firmada por autoridad"
-            full
-          >
-            <UploadPerField onUpload={(files)=>handleUploadPerField('doc_acreditacion', files)} />
-          </Field>
+  <Field label="13. Fecha de nacimiento">
+    <input
+      className="input"
+      type="date"
+      value={f.fechaNacimiento || ""}
+      onChange={(e) => setField("fechaNacimiento", e.target.value)}
+    />
+  </Field>
 
-          <Field label="13. Fecha de nacimiento">
-            <input className="input" type="date" value={f.fechaNacimiento} onChange={setField('fechaNacimiento')} />
-          </Field>
 
           <div className="hr" />
 
           <Field label="Adjuntos generales" desc="Use esta zona para otros respaldos globales al registro" full>
-            <input type="file" multiple onChange={async (e)=> {
-              if (!e.currentTarget.files) return;
-              const ups = await uploadFiles(e.currentTarget.files);
-              setDocs((prev)=>[...prev, ...ups]);
-            }} />
+            <input
+  type="file"
+  multiple
+  onChange={async (e) => {
+    if (!e.currentTarget.files) return;
+    try {
+      setMsg("Subiendo adjuntos...");
+      const ups = await uploadFiles(e.currentTarget.files, "general"); // 👈 SIN docType
+      setDocs((prev) => [...prev, ...ups]);
+      setMsg("✅ Adjuntos subidos");
+    } catch (err: any) {
+      setMsg("❌ " + (err?.message || "Error subiendo adjuntos"));
+    } finally {
+      e.currentTarget.value = "";
+    }
+  }}
+/>
           </Field>
 
           <div className="actions">
             <button type="submit" className="btn btn-primary">Enviar formulario</button>
-            <button type="button" onClick={guardarBorrador} className="rounded-xl bg-gray-700 hover:bg-gray-600 px-4 py-2">Guardar borrador</button>
             <button type="button" onClick={onLogout} className="bg-red-600 hover:bg-red-500 rounded-xl px-4 py-2"
   >
     Cerrar sesión

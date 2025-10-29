@@ -8,15 +8,29 @@ export function requireAuth(
   next: NextFunction
 ) {
   const h = String(req.headers.authorization || "");
-  if (!h.startsWith("Bearer ")) return res.status(401).json({ error: "Falta token de autorización" });
+  if (!h.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Falta token de autorización" });
+  }
 
   const token = h.slice(7);
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || "dev") as any;
-    req.userId = payload.sub;
-    req.role = String(payload.role || "").toLowerCase();
-    next();
-  } catch {
+    const secret = process.env.JWT_SECRET || "dev";
+    const payload = jwt.verify(token, secret) as any;
+
+    // Extrae el id del usuario desde el token.
+    // Aceptamos varias claves comunes: userId, id o sub.
+    const uid: unknown = payload?.userId ?? payload?.id ?? payload?.sub;
+    const role: unknown = payload?.role ?? payload?.rol ?? payload?.scope;
+
+    if (typeof uid !== "string" || uid.trim() === "") {
+      return res.status(401).json({ error: "Token inválido (sin userId)" });
+    }
+
+    req.userId = uid;
+    if (typeof role === "string") req.role = role;
+
+    return next();
+  } catch (_err) {
     return res.status(401).json({ error: "Token inválido" });
   }
 }
@@ -27,7 +41,8 @@ export function requireStaff(
   res: Response,
   next: NextFunction
 ) {
-  if (req.role === "admin" || req.role === "reviewer") return next();
+  if (req.role === "ADMIN" || req.role === "REVIEWER") return next();
   return res.status(403).json({ error: "Sin permiso para acceder" });
 }
+
 

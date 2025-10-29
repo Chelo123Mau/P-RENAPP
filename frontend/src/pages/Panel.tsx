@@ -514,13 +514,13 @@ function EntitySection({
 
         {/* Adjuntos */}
         <div className="grid md:grid-cols-2 gap-4">
-          <FileUpload label="Documento legal que respalde la denominación" fieldKey="docDenominacion" draftKey={draftKey} onUploaded={(files)=>onChange("docDenominacion", [...form.docDenominacion, ...files])} />
-          <FileUpload label="Documento de constitución o acta notariada" fieldKey="docConstitucion" draftKey={draftKey} onUploaded={(files)=>onChange("docConstitucion", [...form.docConstitucion, ...files])} />
-          <FileUpload label="Poder notariado / Acta de designación" fieldKey="docPoderNotariado" draftKey={draftKey} onUploaded={(files)=>onChange("docPoderNotariado", [...form.docPoderNotariado, ...files])} />
-          <FileUpload label="Certificado de registro comercial (FUNDEMPRESA)" fieldKey="docRegistroComercial" draftKey={draftKey} onUploaded={(files)=>onChange("docRegistroComercial", [...form.docRegistroComercial, ...files])} />
-          <FileUpload label="Copia del NIT" fieldKey="docNIT" draftKey={draftKey} onUploaded={(files)=>onChange("docNIT", [...form.docNIT, ...files])} />
+          <FileUpload label="Documento legal que respalde la denominación" fieldKey="docDenominacion" draftKey={draftKey} docType="ENTIDAD" onUploaded={(files)=>onChange("docDenominacion", [...form.docDenominacion, ...files])} />
+          <FileUpload label="Documento de constitución o acta notariada" fieldKey="docConstitucion" draftKey={draftKey} docType="ENTIDAD" onUploaded={(files)=>onChange("docConstitucion", [...form.docConstitucion, ...files])} />
+          <FileUpload label="Poder notariado / Acta de designación" fieldKey="docPoderNotariado" draftKey={draftKey} docType="ENTIDAD" onUploaded={(files)=>onChange("docPoderNotariado", [...form.docPoderNotariado, ...files])} />
+          <FileUpload label="Certificado de registro comercial (FUNDEMPRESA)" fieldKey="docRegistroComercial" draftKey={draftKey} docType="ENTIDAD" onUploaded={(files)=>onChange("docRegistroComercial", [...form.docRegistroComercial, ...files])} />
+          <FileUpload label="Copia del NIT" fieldKey="docNIT" draftKey={draftKey} docType="ENTIDAD" onUploaded={(files)=>onChange("docNIT", [...form.docNIT, ...files])} />
           {form.nacionalOExtranjera === "extranjera" && (
-          <FileUpload label="Constitución en el país (si extranjera)" fieldKey="docExtranjera" draftKey={draftKey} onUploaded={(files)=>onChange("docExtranjera", [...form.docExtranjera, ...files])} />
+          <FileUpload label="Constitución en el país (si extranjera)" fieldKey="docExtranjera" draftKey={draftKey} docType="ENTIDAD" onUploaded={(files)=>onChange("docExtranjera", [...form.docExtranjera, ...files])} />
           )}
         </div>
 

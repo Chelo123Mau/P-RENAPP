@@ -7,7 +7,11 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy"
+  },
+  "engines": {
+    "node": ">=20.x"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.914.0",
@@ -37,4 +41,6 @@
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
   }
+  
+  
 }

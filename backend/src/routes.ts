@@ -702,73 +702,109 @@ r.post("/api/projects/:id/request-change", requireAuth, async (req: any, res) =>
 });
 
 /* ============================ UPLOADS ============================ */
-// Sube hasta 30 archivos en el campo "files"
+
+// routes.ts (esqueleto mínimo compatible con esta página)
+const ALLOWED_DOC_TYPES = ["USUARIO","ENTIDAD","PROYECTO","OVV","ESTANDAR","METODOLOGIA"] as const;
+
 r.post("/api/upload", requireAuth, upload.array("files", 30), async (req: any, res) => {
   try {
-    const userId: string = req.userId;
-
-    // 👇 Con multipart/form-data llegan como strings en req.body
-    const draftKey = String(req.body.draftKey || "");
-    const fieldKey = String(req.body.fieldKey || "");
-    const docType = String(req.body.docType || "");
-
-    if (!fieldKey) {
-      return res.status(400).json({ error: "Falta 'fieldKey' en el body del form-data" });
-    }
-    if (!draftKey) {
-      // Recomendado: exigir draftKey para poder reasignar luego
-      return res.status(400).json({ error: "Falta 'draftKey' en el body del form-data" });
-    }
+    const userId: string | undefined = req.userId;
+    if (!userId) return res.status(401).json({ error: "Token inválido" });
 
     const files = (req.files as Express.Multer.File[]) || [];
-    if (!files.length) {
-      return res.status(400).json({ error: "No se recibieron archivos (campo 'files')" });
+    if (!files.length) return res.status(400).json({ error: "No se recibieron archivos (files[])" });
+
+    const fieldKey = String(req.body.fieldKey || "").trim();
+    if (!fieldKey) return res.status(400).json({ error: "fieldKey es requerido" });
+
+    // Soporte para ambos flujos:
+    // A) borrador → draftKey
+    // B) directo a registros → entityId / projectId
+    const draftKey  = String(req.body.draftKey || "").trim() || undefined;
+    const entityId  = String(req.body.entityId || "").trim() || undefined;
+    const projectId = String(req.body.projectId || "").trim() || undefined;
+
+    // docType opcional (omitido → default USUARIO)
+    const rawDocType = req.body.docType;
+    const docType = typeof rawDocType === "string" ? rawDocType.trim().toUpperCase() : "";
+    const clientSentDocType = rawDocType !== undefined && rawDocType !== null && String(rawDocType).trim() !== "";
+    if (clientSentDocType && !(ALLOWED_DOC_TYPES as readonly string[]).includes(docType)) {
+      return res.status(400).json({ error: `docType inválido. Permitidos: ${ALLOWED_DOC_TYPES.join(", ")}` });
+    }
+
+    // Validaciones de anclaje
+    const usingDraft   = !!draftKey && !entityId && !projectId;
+    const usingEntity  = !!entityId && !projectId;
+    const usingProject = !!projectId && !entityId;
+
+    if (!usingDraft && !usingEntity && !usingProject) {
+      console.log("[UPLOAD] Modo usuario: sin draft/entity/project");
+    }
+
+    // Verifica propiedad y obtiene nombres cuando corresponda
+    let entityName: string | undefined;
+
+    if (usingEntity) {
+      const ent = await prisma.entity.findFirst({ where: { id: entityId, userId } });
+      if (!ent) return res.status(404).json({ error: "Entidad no encontrada o no pertenece al usuario" });
+      entityName = ent.name; // en tu Prisma existe File.entityName (String?)
+    }
+
+    if (usingProject) {
+      const proj = await prisma.project.findFirst({ where: { id: projectId, userId } });
+      if (!proj) return res.status(404).json({ error: "Proyecto no encontrado o no pertenece al usuario" });
+      // OJO: tu File NO tiene projectTitle; solo guardamos projectId.
     }
 
     const out: any[] = [];
-
     for (const f of files) {
       const { key, url } = await storeFile(f.buffer, f.originalname, f.mimetype);
 
-      const rec = await prisma.file.create({
-        data: {
-          
-          draftKey,
-          fieldKey,
-          createdByUserId: userId, // MUY importante
-          
-          // datos del archivo
-          key,
-          url,
-          name: f.originalname,
-          size: f.size ?? null,
-          mime: f.mimetype ?? null,
+      const data: any = {
+        // ⚠️ En tu Prisma: File.userId es la FK real. Úsala SIEMPRE.
+        userId,
+        key,
+        url,
+        name: f.originalname,
+        size: typeof f.size === "number" ? f.size : null,   // size es Int? → puede ir null
+        mime: typeof f.mimetype === "string" ? f.mimetype : null, // mime es String? → puede ir null
+        fieldKey,
+      };
 
-          // Asegúrate de NO setear entityId/Name aquí (se asignan al enviar el formulario)
-          entityId: null,
-          entityName: null,
-          
-        },
-      });
+      // createdByUserId existe como String? pero no es FK. Si quieres auditar, puedes guardarlo también:
+      // data.createdByUserId = userId;
 
+      if (clientSentDocType) data.docType = docType; // omitido => Prisma pone USUARIO
+
+      if (usingDraft) {
+        data.draftKey = draftKey;
+      } else if (usingEntity) {
+        data.entityId   = entityId;
+        data.entityName = entityName ?? null; // solo existe entityName en tu File
+      } else if (usingProject) {
+        data.projectId  = projectId;
+        // NO existe projectTitle en File → no lo seteamos
+      }
+
+      const rec = await prisma.file.create({ data });
       out.push({
-        id: rec.id,
-        name: rec.name,
-        url: rec.url,
-        size: rec.size,
-        mime: rec.mime,
-        fieldKey: rec.fieldKey,
-        draftKey: rec.draftKey,
-        docType: rec.docType,
+        id: rec.id, name: rec.name, url: rec.url, size: rec.size, mime: rec.mime,
+        fieldKey: rec.fieldKey, docType: rec.docType,
+        draftKey: rec.draftKey ?? null,
+        entityId: rec.entityId ?? null, entityName: rec.entityName ?? null,
+        projectId: rec.projectId ?? null,
+        userId: rec.userId ?? null,
       });
     }
 
     return res.json({ files: out });
   } catch (err) {
-    console.error("POST /api/upload error:", err);
-    return res.status(500).json({ error: "Error al subir archivo(s)" });
+    console.error("[/api/upload] error:", err);
+    return res.status(500).json({ error: "Error subiendo/guardando archivo" });
   }
 });
+
+
 
 
 /* ============================ HISTORIAL & BANDEJA ============================ */

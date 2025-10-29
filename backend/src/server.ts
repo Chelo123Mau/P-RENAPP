@@ -96,6 +96,25 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.use(routes);
+
+app.set('trust proxy', 1); // opcional pero recomendado si usas cookies
+
+const allowed = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: allowed.length ? allowed : true,
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
+
+app.get('/health', (_req, res) => res.sendStatus(200));
+
+
+
 // ---------------------------
 /** DB en memoria (demo) */
 
@@ -588,7 +607,8 @@ app.use(r);
 /** Arranque */
 // ---------------------------
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
+
   console.log(`API escuchando en http://localhost:${PORT}`);
   console.log(`✅ Backend RENAPP escuchando en el puerto ${PORT}`);
   // Si tienes FRONT_ORIGIN:
