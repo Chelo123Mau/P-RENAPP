@@ -76,47 +76,11 @@ export function inferUserStatus(u: User): NonNullable<User['status']> {
 
 // ---------------------------
 const app = express();
-const PORT = Number(process.env.PORT || 4000);
-const FRONT_ORIGIN = process.env.FRONT_ORIGIN || 'http://localhost:5173';
-const r = Router();
-
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    FRONT_ORIGIN, // en Render: https://renapp-frontend.onrender.com
-  ],
-  credentials: true,
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
-}));
-app.use(cookieParser());
 app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
-
-app.use(routes);
-
 app.set('trust proxy', 1); // opcional pero recomendado si usas cookies
 
-const allowed = (process.env.CORS_ORIGIN || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
 
-app.use(cors({
-  origin: allowed.length ? allowed : true,
-  credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
-}));
-
-app.options("*", cors(corsOptions));
-
-app.get('/health', (_req, res) => res.sendStatus(200));
-
-// Permite Render + localhost (multi-origen por coma)
 const ALLOWED_ORIGINS = (
   process.env.CORS_ORIGIN ||      // ← preferente (Render)
   process.env.FRONT_ORIGIN ||     // ← compatibilidad con tu var actual
@@ -142,7 +106,46 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions));
 // MUY IMPORTANTE: responder preflight para todas las rutas
 app.options('*', cors(corsOptions));
+app.get('/health', (_req, res) => res.sendStatus(200));
 
+const PORT = Number(process.env.PORT || 4000);
+const FRONT_ORIGIN = process.env.FRONT_ORIGIN || 'http://localhost:5173';
+const r = Router();
+
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    FRONT_ORIGIN, // en Render: https://renapp-frontend.onrender.com
+  ],
+  credentials: true,
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
+app.use(cookieParser());
+
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+app.use(routes);
+
+
+const allowed = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: allowed.length ? allowed : true,
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
+
+app.options("*", cors(corsOptions));
+
+// Permite Render + localhost (multi-origen por coma)
 
 // ---------------------------
 /** DB en memoria (demo) */
