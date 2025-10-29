@@ -13,7 +13,7 @@ services:
       npm ci
       npm run build
       npm run prisma:generate
-    startCommand: node dist/server.js
+    startCommand: bash -lc "npm run prisma:migrate:deploy && node dist/server.js"
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -47,7 +47,6 @@ services:
     name: renapp-frontend
     env: static
     plan: free
-    region: oregon
     repo: https://github.com/Chelo123Mau/P-RENAPP
     branch: main
     rootDir: frontend
