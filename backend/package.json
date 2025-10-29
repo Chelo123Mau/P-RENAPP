@@ -9,7 +9,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:seed-admin": "node dist/prisma/seeds/seedAdmin.js"
+    "prisma:seed-admin": "node dist/prisma/seedAdmin.js"
   },
   "engines": {
     "node": ">=20.x"
@@ -44,7 +44,7 @@
     "@types/bcryptjs": "^2.4.2"
   },
   "prisma": {
-    "seed": "node dist/prisma/seeds/seedAdmin.js"
+    "seed": "node dist/prisma/seedAdmin.js"
   }
   
 }
