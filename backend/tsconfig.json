@@ -12,5 +12,6 @@
     "strict": false
   },
   
-  "include": ["src"]
+  "include": ["src/**/*.ts",
+    "prisma/**/*.ts"]
 }
