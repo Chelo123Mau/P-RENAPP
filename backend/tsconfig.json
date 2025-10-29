@@ -12,5 +12,5 @@
     "strict": false
   },
   
-  "include": ["src/**/*.ts", "prisma/**/*.ts", "prisma/seedAdmin.js"]
+  "include": ["src"]
 }

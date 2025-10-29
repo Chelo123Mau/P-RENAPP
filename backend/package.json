@@ -9,7 +9,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:seed-admin": "node dist/prisma/seedAdmin.js"
+    "prisma:seed-admin": "node dist/prisma/seeds/seedAdmin.js"
   },
   "engines": {
     "node": ">=20.x"
