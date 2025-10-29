@@ -40,9 +40,7 @@ services:
       # - key: AWS_SECRET_ACCESS_KEY
       #   value: xxxx
     # Ejecuta migraciones en cada deploy
-    preDeployCommand: npm run prisma:migrate:deploy
-
-  # --- FRONTEND (Static Site) ---
+    # --- FRONTEND (Static Site) ---
   - type: web
     name: renapp-frontend
     env: static
