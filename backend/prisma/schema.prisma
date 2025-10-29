@@ -155,7 +155,7 @@ model File {
 
   key  String
   url  String
-  name String
+  name String?
   size Int?
   mime String?
 

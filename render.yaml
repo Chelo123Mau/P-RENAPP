@@ -43,8 +43,9 @@ services:
     postdeployCommand: npm run prisma:migrate:deploy
 
   # --- FRONTEND (Static Site) ---
-  - type: static
+  - type: web
     name: renapp-frontend
+    env: static
     plan: free
     region: oregon
     repo: https://github.com/Chelo123Mau/P-RENAPP
@@ -65,4 +66,5 @@ services:
 databases:
   - name: renapp-db
     plan: free
+    region: oregon
 
