@@ -672,7 +672,7 @@ r.post("/api/projects/draft", requireAuth, async (req: any, res) => {
 r.post("/api/projects", requireAuth, async (req: any, res) => {
   const ent = await prisma.entity.findFirst({ where: { userId: req.userId } });
   if (!ent) return res.status(400).json({ error: "Primero registre una entidad" });
-  const { title, summary, data } = req.body || {};
+  const { title, summary, data, draftKey } = req.body || {};
 
   const titularMedida = data?.titularMedida ?? null;
   const representanteLegal = data?.representanteLegal ?? null;
@@ -681,18 +681,55 @@ r.post("/api/projects", requireAuth, async (req: any, res) => {
   const modeloMercado = data?.modeloMercado ?? summary ?? null;
   const areaProyecto = data?.areaProyecto ?? null;
 
-  const p = await prisma.project.create({
-    data: {
-      userId: req.userId,
-      entityId: ent.id,
-      title,
-      status: "ENVIADO",
-      data,
-      titularMedida, representanteLegal, numeroIdentidad, numeroDocNotariado, modeloMercado, areaProyecto
-    }
-  });
-  
-  res.json(p);
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // 3️⃣ Crear el proyecto
+      const project = await tx.project.create({
+        data: {
+          userId: req.userId,
+          entityId: ent.id,
+          title,
+          status: "ENVIADO",
+          data,
+          // titularMedida,
+          // representanteLegal,
+          // numeroIdentidad,
+          // numeroDocNotariado,
+          // modeloMercado,
+          // areaProyecto,
+        },
+      });
+
+  let filesLinked = 0;
+      if (draftKey && String(draftKey).trim() !== "") {
+        const resUpd = await tx.file.updateMany({
+          where: {
+            userId: req.userId,
+            draftKey: String(draftKey).trim(),
+            projectId: null, // solo los archivos que no tengan proyecto aún
+          },
+          data: {
+            projectId: project.id,
+            docType: "PROYECTO",
+            draftKey: null, // opcional: limpiar draftKey para “cerrar” el borrador
+          },
+        });
+        filesLinked = resUpd.count;
+      }
+
+      return { project, filesLinked };
+    });
+
+    // 5️⃣ Responder al frontend con confirmación
+    return res.json({
+      ok: true,
+      data: result.project,
+      filesLinked: result.filesLinked,
+    });
+  } catch (e: any) {
+    console.error("[POST /api/projects] error:", e);
+    return res.status(400).json({ ok: false, error: e.message });
+  }
 });
 
 r.post("/api/projects/:id/request-change", requireAuth, async (req: any, res) => {
